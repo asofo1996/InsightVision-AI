@@ -11,14 +11,18 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
-SUPPORTED_MIMETYPES = ['video/mp4']
+SUPPORTED_VIDEO_TYPES = ['video/mp4']
+SUPPORTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/jpg']
 
 def authenticate_google():
     creds = Credentials.from_authorized_user_info(st.secrets["gcp_token"], SCOPES)
     return build('drive', 'v3', credentials=creds)
 
 def list_drive_files(service, filetype='video'):
-    query = "mimeType contains 'video/'" if filetype == 'video' else "mimeType contains 'image/'"
+    if filetype == 'video':
+        query = " or ".join([f"mimeType='{m}'" for m in SUPPORTED_VIDEO_TYPES])
+    elif filetype == 'image':
+        query = " or ".join([f"mimeType='{m}'" for m in SUPPORTED_IMAGE_TYPES])
     results = service.files().list(q=query, pageSize=20, fields="files(id, name, mimeType)").execute()
     return results.get('files', [])
 
@@ -71,9 +75,9 @@ def transcribe_audio_whisper(audio_path):
     result = model.transcribe(audio_path, fp16=torch.cuda.is_available())
     return result['text']
 
-def summarize_all_inputs(frames_desc, transcript, title, prompt):
+def summarize_video_inputs(frames_desc, transcript, title, prompt):
     summary = f"Title: {title}\n\n"
-    summary += "1-sec interval visual descriptions:\n" + "\n".join([f"{i+1}. {desc}" for i, desc in enumerate(frames_desc)]) + "\n\n"
+    summary += "Frame Descriptions (1s intervals):\n" + "\n".join([f"{i+1}. {desc}" for i, desc in enumerate(frames_desc)]) + "\n\n"
     summary += f"Transcript:\n{transcript}\n\n"
     summary += prompt.strip()
     return summary
@@ -84,49 +88,85 @@ def analyze_with_ollama(prompt_text):
     chain = LLMChain(prompt=template, llm=llm)
     return chain.run(prompt_text=prompt_text)
 
-# Streamlit UI
-st.set_page_config(page_title="🎥 Insight Vision AI", layout="wide")
-st.title("📊 영상·이미지 기반 AI 분석 시스템")
+# UI
+st.set_page_config(page_title="Insight Vision AI", layout="wide")
+st.title("🎥 영상/이미지 자동 분기 AI 분석 시스템")
 
-prompt_text = st.text_area("💬 Ollama 분석 프롬프트 작성",
-    "Please analyze the type of content, the primary target audience, whether it's appropriate, and provide 3 improvement suggestions.")
+prompt_text = st.text_area("💬 Ollama 분석 프롬프트",
+    "Please analyze the content type, main audience, tone, and suggest 3 improvements.")
 
+# Drive 인증
 service = authenticate_google()
+
+# 선택된 파일 저장 변수
 video_path = None
+image_path = None
+image_obj = None
 
+# 📁 Google Drive 영상 선택
 with st.expander("📁 Google Drive에서 영상 선택"):
-    files = list_drive_files(service, filetype='video')
-    if files:
-        file = st.selectbox("🎬 파일 선택:", files, format_func=lambda x: x['name'])
+    video_files = list_drive_files(service, filetype='video')
+    if video_files:
+        selected = st.selectbox("🎬 영상 선택", video_files, format_func=lambda x: x['name'], key="drive_video")
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
-            video_path = download_file(service, file['id'], tmp.name)
+            video_path = download_file(service, selected['id'], tmp.name)
             st.video(video_path)
-    else:
-        st.warning("Drive에 mp4 파일이 없습니다.")
 
-uploaded_file = st.file_uploader("또는 영상(mp4) 직접 업로드", type=["mp4"])
-if uploaded_file:
+# 📁 Google Drive 이미지 선택
+with st.expander("📁 Google Drive에서 이미지 선택"):
+    image_files = list_drive_files(service, filetype='image')
+    if image_files:
+        selected = st.selectbox("🖼️ 이미지 선택", image_files, format_func=lambda x: x['name'], key="drive_image")
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+            download_file(service, selected["id"], tmp.name)
+            image_path = tmp.name
+            image_obj = Image.open(image_path).convert("RGB")
+            st.image(image_obj, caption="Drive 이미지", use_column_width=True)
+
+# 📤 영상 업로드
+uploaded_video = st.file_uploader("📤 직접 영상 업로드", type=["mp4"], key="upload_video")
+if uploaded_video:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
-        tmp.write(uploaded_file.read())
+        tmp.write(uploaded_video.read())
         video_path = tmp.name
         st.video(video_path)
 
-if video_path and st.button("🧠 AI 분석 시작"):
-    with st.spinner("🎞️ 프레임 추출 중..."):
-        frames = extract_all_keyframes(video_path)
-        descriptions = [describe_image_with_blip(Image.open(f)) for f in frames]
+# 📤 이미지 업로드
+uploaded_image = st.file_uploader("📤 직접 이미지 업로드", type=["jpg", "jpeg", "png"], key="upload_image")
+if uploaded_image:
+    image_obj = Image.open(uploaded_image).convert("RGB")
+    st.image(image_obj, caption="업로드한 이미지", use_column_width=True)
 
-    with st.spinner("🔊 Whisper로 음성 분석 중..."):
-        audio_path = extract_audio_ffmpeg(video_path)
-        transcript = transcribe_audio_whisper(audio_path)
+# 🎯 자동 분기 AI 분석 버튼
+if st.button("🧠 AI 분석 시작"):
+    if image_obj is not None:
+        with st.spinner("📸 이미지 설명 생성 중..."):
+            desc = describe_image_with_blip(image_obj)
+        with st.spinner("🧠 Ollama 분석 중..."):
+            result = analyze_with_ollama(f"Image Description:\n{desc}\n\n{prompt_text}")
+        st.success("✅ 이미지 분석 완료")
+        st.subheader("📄 분석 결과")
+        st.write(result)
 
-    with st.spinner("🤖 Ollama 분석 중..."):
-        title = os.path.basename(video_path)
-        combined_prompt = summarize_all_inputs(descriptions, transcript, title, prompt_text)
-        result = analyze_with_ollama(combined_prompt)
+    elif video_path is not None:
+        with st.spinner("🎞️ 프레임 추출 중..."):
+            frames = extract_all_keyframes(video_path)
+            descriptions = [describe_image_with_blip(Image.open(f)) for f in frames]
 
-    st.success("✅ 분석 완료")
-    st.subheader("📄 AI 분석 결과")
-    st.write(result)
+        with st.spinner("🔊 Whisper 음성 분석 중..."):
+            audio_path = extract_audio_ffmpeg(video_path)
+            transcript = transcribe_audio_whisper(audio_path)
 
-st.caption("Powered by Whisper + BLIP + Ollama + ffmpeg + Streamlit + Google Drive")
+        with st.spinner("🧠 Ollama 종합 분석 중..."):
+            title = os.path.basename(video_path)
+            final_prompt = summarize_video_inputs(descriptions, transcript, title, prompt_text)
+            result = analyze_with_ollama(final_prompt)
+
+        st.success("✅ 영상 분석 완료")
+        st.subheader("📄 분석 결과")
+        st.write(result)
+
+    else:
+        st.warning("⚠️ 분석할 영상 또는 이미지를 선택하거나 업로드해 주세요.")
+
+st.caption("🔗 Powered by Whisper + BLIP + Ollama + Streamlit + Google Drive")
