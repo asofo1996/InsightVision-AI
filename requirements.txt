@@ -5,6 +5,7 @@ transformers
 whisper
 Pillow
 langchain
+langchain-community
 google-auth-oauthlib
 google-api-python-client
 imageio
