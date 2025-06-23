@@ -1,6 +1,7 @@
 import streamlit as st
-import os, tempfile, cv2, torch, subprocess
+import os, tempfile, cv2, torch
 import whisper
+import ffmpeg
 from PIL import Image
 from transformers import BlipProcessor, BlipForConditionalGeneration
 from langchain_community.llms import Ollama
@@ -13,7 +14,6 @@ from googleapiclient.http import MediaIoBaseDownload
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 SUPPORTED_MIMETYPES = ['video/mp4']
 
-# ✅ Streamlit Cloud 호환 Google 인증 방식
 def authenticate_google():
     creds = Credentials.from_authorized_user_info(st.secrets["gcp_token"], SCOPES)
     return build('drive', 'v3', credentials=creds)
@@ -61,18 +61,15 @@ def describe_image_with_blip(pil_image):
     return processor.decode(out[0], skip_special_tokens=True)
 
 def extract_audio(video_path):
-    path = os.path.join(tempfile.gettempdir(), "audio.wav")
-    command = [
-        "ffmpeg",
-        "-i", video_path,
-        "-vn",
-        "-acodec", "pcm_s16le",
-        "-ar", "16000",
-        "-ac", "1",
-        path
-    ]
-    subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return path
+    audio_path = os.path.join(tempfile.gettempdir(), "audio.wav")
+    (
+        ffmpeg
+        .input(video_path)
+        .output(audio_path, ac=1, ar='16000')
+        .overwrite_output()
+        .run(quiet=True)
+    )
+    return audio_path
 
 def transcribe_audio_whisper(audio_path):
     model = whisper.load_model("base")
