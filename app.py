@@ -6,34 +6,16 @@ from transformers import BlipProcessor, BlipForConditionalGeneration
 from langchain_community.llms import Ollama
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
-from google_auth_oauthlib.flow import InstalledAppFlow
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 SUPPORTED_MIMETYPES = ['video/mp4']
 
+# ✅ Streamlit Cloud 호환 Google 인증 방식
 def authenticate_google():
-    creds = None
-    if os.path.exists('token.json'):
-        from google.oauth2.credentials import Credentials
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-    if not creds or not creds.valid:
-        client_id = st.secrets["GOOGLE_CLIENT_ID"]
-        client_secret = st.secrets["GOOGLE_CLIENT_SECRET"]
-        client_config = {
-            "installed": {
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": ["http://localhost"]
-            }
-        }
-        flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
-        creds = flow.run_console()
-        with open('token.json', 'w') as token:
-            token.write(creds.to_json())
+    creds = Credentials.from_authorized_user_info(st.secrets["gcp_token"], SCOPES)
     return build('drive', 'v3', credentials=creds)
 
 def list_drive_files(service, filetype='video'):
