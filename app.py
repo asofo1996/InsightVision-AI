@@ -1,7 +1,7 @@
 import streamlit as st
 import os, tempfile, cv2, torch
 import whisper
-import ffmpeg
+from pydub import AudioSegment
 from PIL import Image
 from transformers import BlipProcessor, BlipForConditionalGeneration
 from langchain_community.llms import Ollama
@@ -62,13 +62,8 @@ def describe_image_with_blip(pil_image):
 
 def extract_audio(video_path):
     audio_path = os.path.join(tempfile.gettempdir(), "audio.wav")
-    (
-        ffmpeg
-        .input(video_path)
-        .output(audio_path, ac=1, ar='16000')
-        .overwrite_output()
-        .run(quiet=True)
-    )
+    audio = AudioSegment.from_file(video_path)
+    audio.set_frame_rate(16000).set_channels(1).export(audio_path, format="wav")
     return audio_path
 
 def transcribe_audio_whisper(audio_path):
@@ -89,7 +84,7 @@ def analyze_with_ollama(prompt_text):
     chain = LLMChain(prompt=template, llm=llm)
     return chain.run(prompt_text=prompt_text)
 
-# UI 시작
+# Streamlit UI 시작
 st.set_page_config(page_title="AI 콘텐츠 분석 솔루션", layout="wide")
 st.title("📊 AI 기반 영상 및 이미지 분석 시스템")
 
