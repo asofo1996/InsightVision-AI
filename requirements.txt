@@ -2,11 +2,10 @@ streamlit
 opencv-python-headless
 torch
 transformers
-moviepy
-imageio
-imageio-ffmpeg
 whisper
 Pillow
 langchain
 google-auth-oauthlib
 google-api-python-client
+imageio
+imageio-ffmpeg
