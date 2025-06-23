@@ -1,9 +1,10 @@
 streamlit
+opencv-python-headless
+torch
+transformers
+moviepy
+whisper
+Pillow
+langchain
 google-auth-oauthlib
 google-api-python-client
-moviepy
-transformers
-torch
-opencv-python
-pillow
-langchain
