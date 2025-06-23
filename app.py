@@ -1,4 +1,4 @@
-# ✅ AI 콘텐츠 분석 솔루션 (영상 + 이미지) - 완성형 버전
+# ✅ AI 콘텐츠 분석 솔루션 (영상 + 이미지) - Streamlit Cloud 호환 완성형
 
 import streamlit as st
 import os, tempfile, cv2, torch, subprocess
@@ -33,7 +33,7 @@ def authenticate_google():
             }
         }
         flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
-        creds = flow.run_local_server(port=0)
+        creds = flow.run_console()  # ✅ Streamlit Cloud 호환 방식
         with open('token.json', 'w') as token:
             token.write(creds.to_json())
     return build('drive', 'v3', credentials=creds)
@@ -141,7 +141,7 @@ if uploaded_file:
         video_path = tmp.name
         st.video(video_path)
 
-# 이미지 업로드 및 분석
+# 이미지 분석 - 로컬 업로드
 with st.expander("🖼️ 이미지 파일 단독 분석"):
     image_file = st.file_uploader("이미지 파일 업로드 (jpg/png)", type=["jpg", "jpeg", "png"])
     if image_file:
@@ -156,7 +156,7 @@ with st.expander("🖼️ 이미지 파일 단독 분석"):
             st.subheader("📄 이미지 분석 결과 (영문)")
             st.write(result_img)
 
-# Google Drive 이미지 분석
+# 이미지 분석 - Google Drive
 with st.expander("🖼️ Google Drive에서 이미지 파일 선택하기"):
     image_files = list_drive_files(service, filetype='image')
     if image_files:
@@ -177,7 +177,7 @@ with st.expander("🖼️ Google Drive에서 이미지 파일 선택하기"):
     else:
         st.warning("Google Drive에 이미지 파일이 없습니다.")
 
-# 영상 분석 버튼
+# 영상 분석
 if video_path:
     st.markdown("---")
     st.markdown("<div style='text-align:center;'>", unsafe_allow_html=True)
