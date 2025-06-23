@@ -1,0 +1,9 @@
+streamlit
+google-auth-oauthlib
+google-api-python-client
+moviepy
+transformers
+torch
+opencv-python
+pillow
+langchain

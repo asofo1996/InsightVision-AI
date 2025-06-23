@@ -1,0 +1,10 @@
+# 민감 정보 제외
+credentials.json
+token.json
+.streamlit/secrets.toml
+
+# 실행 파일 제외
+*.exe
+
+# 기타
+__pycache__/
