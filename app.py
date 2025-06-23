@@ -1,9 +1,8 @@
 # ✅ AI 콘텐츠 분석 솔루션 (영상 + 이미지) - 완성형 버전
 
 import streamlit as st
-import os, tempfile, cv2, torch
+import os, tempfile, cv2, torch, subprocess
 import whisper
-import moviepy.editor as mp
 from PIL import Image
 from transformers import BlipProcessor, BlipForConditionalGeneration
 from langchain_community.llms import Ollama
@@ -22,13 +21,8 @@ def authenticate_google():
         from google.oauth2.credentials import Credentials
         creds = Credentials.from_authorized_user_file('token.json', SCOPES)
     if not creds or not creds.valid:
-        from google_auth_oauthlib.flow import InstalledAppFlow
-        import json
-
-        # ✅ secrets.toml에서 비밀값 불러오기
         client_id = st.secrets["GOOGLE_CLIENT_ID"]
         client_secret = st.secrets["GOOGLE_CLIENT_SECRET"]
-
         client_config = {
             "installed": {
                 "client_id": client_id,
@@ -38,10 +32,8 @@ def authenticate_google():
                 "redirect_uris": ["http://localhost"]
             }
         }
-
         flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
         creds = flow.run_local_server(port=0)
-
         with open('token.json', 'w') as token:
             token.write(creds.to_json())
     return build('drive', 'v3', credentials=creds)
@@ -90,8 +82,16 @@ def describe_image_with_blip(pil_image):
 
 def extract_audio(video_path):
     path = os.path.join(tempfile.gettempdir(), "audio.wav")
-    clip = mp.VideoFileClip(video_path)
-    clip.audio.write_audiofile(path, verbose=False, logger=None)
+    command = [
+        "ffmpeg",
+        "-i", video_path,
+        "-vn",
+        "-acodec", "pcm_s16le",
+        "-ar", "16000",
+        "-ac", "1",
+        path
+    ]
+    subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return path
 
 def transcribe_audio_whisper(audio_path):
@@ -177,7 +177,7 @@ with st.expander("🖼️ Google Drive에서 이미지 파일 선택하기"):
     else:
         st.warning("Google Drive에 이미지 파일이 없습니다.")
 
-# 영상 분석 버튼 (중앙 고정)
+# 영상 분석 버튼
 if video_path:
     st.markdown("---")
     st.markdown("<div style='text-align:center;'>", unsafe_allow_html=True)
