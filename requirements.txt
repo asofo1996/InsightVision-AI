@@ -10,3 +10,5 @@ google-api-python-client
 langchain
 langchain-community
 ffmpeg-python
+requests
+ollama
