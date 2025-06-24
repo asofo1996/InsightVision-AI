@@ -1,5 +1,5 @@
 import streamlit as st
-import os, tempfile, cv2, torch, subprocess
+import os, tempfile, cv2, torch, subprocess, shutil
 import whisper
 from PIL import Image
 from transformers import BlipProcessor, BlipForConditionalGeneration
@@ -10,13 +10,21 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
+# ✅ secrets.toml 자동 복사 (Render 대응용)
+if os.path.exists("/etc/secrets/secrets.toml"):
+    os.makedirs(".streamlit", exist_ok=True)
+    shutil.copy("/etc/secrets/secrets.toml", ".streamlit/secrets.toml")
+
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 SUPPORTED_VIDEO_TYPES = ['video/mp4']
 SUPPORTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/jpg']
 
+# ✔️ 구글 인증
 def authenticate_google():
     creds = Credentials.from_authorized_user_info(st.secrets["gcp_token"], SCOPES)
     return build('drive', 'v3', credentials=creds)
+
+# ✔️ 파일 목록
 
 def list_drive_files(service, filetype='video'):
     if filetype == 'video':
@@ -25,6 +33,8 @@ def list_drive_files(service, filetype='video'):
         query = " or ".join([f"mimeType='{m}'" for m in SUPPORTED_IMAGE_TYPES])
     results = service.files().list(q=query, pageSize=20, fields="files(id, name, mimeType)").execute()
     return results.get('files', [])
+
+# ✔️ 파일 다운로드
 
 def download_file(service, file_id, filename):
     request = service.files().get_media(fileId=file_id)
@@ -35,6 +45,8 @@ def download_file(service, file_id, filename):
             _, done = downloader.next_chunk()
     return filename
 
+# ✔️ Whisper 오디오 추출
+
 def extract_audio_ffmpeg(video_path):
     audio_path = os.path.join(tempfile.gettempdir(), "audio.wav")
     command = [
@@ -44,6 +56,8 @@ def extract_audio_ffmpeg(video_path):
     ]
     subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return audio_path
+
+# ✔️ 1초 단위 프레임 찾기
 
 def extract_all_keyframes(video_path, fps=1):
     cap = cv2.VideoCapture(video_path)
@@ -63,6 +77,8 @@ def extract_all_keyframes(video_path, fps=1):
     cap.release()
     return frames
 
+# ✔️ BLIP 이미지 미리 문서 설명
+
 def describe_image_with_blip(pil_image):
     processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
     model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
@@ -70,10 +86,14 @@ def describe_image_with_blip(pil_image):
     out = model.generate(**inputs)
     return processor.decode(out[0], skip_special_tokens=True)
 
+# ✔️ Whisper 음성 문서 변환
+
 def transcribe_audio_whisper(audio_path):
     model = whisper.load_model("base")
     result = model.transcribe(audio_path, fp16=torch.cuda.is_available())
     return result['text']
+
+# ✔️ 종합 프로법 만들기
 
 def summarize_video_inputs(frames_desc, transcript, title, prompt):
     summary = f"Title: {title}\n\n"
@@ -82,37 +102,43 @@ def summarize_video_inputs(frames_desc, transcript, title, prompt):
     summary += prompt.strip()
     return summary
 
+# ✔️ Ollama 연동
+
 def analyze_with_ollama(prompt_text):
     template = PromptTemplate.from_template("""{prompt_text}""")
     llm = Ollama(model="llama3")
     chain = LLMChain(prompt=template, llm=llm)
     return chain.run(prompt_text=prompt_text)
 
-# UI
+# =============================== UI ===============================
+
 st.set_page_config(page_title="Insight Vision AI", layout="wide")
 st.title("🎥 영상/이미지 자동 분기 AI 분석 시스템")
 
-prompt_text = st.text_area("💬 Ollama 분석 프롬프트",
+prompt_text = st.text_area("🗨️ Ollama 분석 프로머트",
     "Please analyze the content type, main audience, tone, and suggest 3 improvements.")
 
 # Drive 인증
-service = authenticate_google()
+try:
+    service = authenticate_google()
+except Exception as e:
+    st.error("🔐 Google Drive 인증 실패: secrets.toml 설정을 확인하세요.")
+    st.stop()
 
-# 선택된 파일 저장 변수
 video_path = None
 image_path = None
 image_obj = None
 
-# 📁 Google Drive 영상 선택
+# Google Drive 영상 선택
 with st.expander("📁 Google Drive에서 영상 선택"):
     video_files = list_drive_files(service, filetype='video')
     if video_files:
-        selected = st.selectbox("🎬 영상 선택", video_files, format_func=lambda x: x['name'], key="drive_video")
+        selected = st.selectbox("🎮 영상 선택", video_files, format_func=lambda x: x['name'], key="drive_video")
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
             video_path = download_file(service, selected['id'], tmp.name)
             st.video(video_path)
 
-# 📁 Google Drive 이미지 선택
+# Google Drive 이미지 선택
 with st.expander("📁 Google Drive에서 이미지 선택"):
     image_files = list_drive_files(service, filetype='image')
     if image_files:
@@ -123,24 +149,23 @@ with st.expander("📁 Google Drive에서 이미지 선택"):
             image_obj = Image.open(image_path).convert("RGB")
             st.image(image_obj, caption="Drive 이미지", use_column_width=True)
 
-# 📤 영상 업로드
-uploaded_video = st.file_uploader("📤 직접 영상 업로드", type=["mp4"], key="upload_video")
+# 직접 업로드
+uploaded_video = st.file_uploader("📄 직접 영상 업로드", type=["mp4"], key="upload_video")
 if uploaded_video:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
         tmp.write(uploaded_video.read())
         video_path = tmp.name
         st.video(video_path)
 
-# 📤 이미지 업로드
-uploaded_image = st.file_uploader("📤 직접 이미지 업로드", type=["jpg", "jpeg", "png"], key="upload_image")
+uploaded_image = st.file_uploader("📄 직접 이미지 업로드", type=["jpg", "jpeg", "png"], key="upload_image")
 if uploaded_image:
     image_obj = Image.open(uploaded_image).convert("RGB")
     st.image(image_obj, caption="업로드한 이미지", use_column_width=True)
 
-# 🎯 자동 분기 AI 분석 버튼
-if st.button("🧠 AI 분석 시작"):
-    if image_obj is not None:
-        with st.spinner("📸 이미지 설명 생성 중..."):
+# 이미지 분석 버튼
+if image_obj is not None:
+    if st.button("📸 이미지 분석 시작"):
+        with st.spinner("📸 설명 생성 중..."):
             desc = describe_image_with_blip(image_obj)
         with st.spinner("🧠 Ollama 분석 중..."):
             result = analyze_with_ollama(f"Image Description:\n{desc}\n\n{prompt_text}")
@@ -148,8 +173,10 @@ if st.button("🧠 AI 분석 시작"):
         st.subheader("📄 분석 결과")
         st.write(result)
 
-    elif video_path is not None:
-        with st.spinner("🎞️ 프레임 추출 중..."):
+# 영상 분석 버튼
+elif video_path is not None:
+    if st.button("🎬 영상 분석 시작"):
+        with st.spinner("🎮 프레임 추출 중..."):
             frames = extract_all_keyframes(video_path)
             descriptions = [describe_image_with_blip(Image.open(f)) for f in frames]
 
@@ -166,7 +193,7 @@ if st.button("🧠 AI 분석 시작"):
         st.subheader("📄 분석 결과")
         st.write(result)
 
-    else:
-        st.warning("⚠️ 분석할 영상 또는 이미지를 선택하거나 업로드해 주세요.")
+else:
+    st.warning("⚠️ 분석할 영상 또는 이미지를 선택하거나 업로드해 주세요.")
 
 st.caption("🔗 Powered by Whisper + BLIP + Ollama + Streamlit + Google Drive")
