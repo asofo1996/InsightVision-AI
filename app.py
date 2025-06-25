@@ -15,6 +15,7 @@ from langchain_core.prompts import PromptTemplate
 
 st.set_page_config(page_title="AI 콘텐츠 분석 시스템", layout="wide")
 st.title("🎬 AI 콘텐츠 분석 시스템")
+
 prompt_text = st.text_area("분석 프롬프트", "Please analyze the content type, main audience, tone, and suggest 3 improvements.", key="main_prompt")
 
 UPLOAD_DIR = os.path.join(os.getcwd(), "uploaded")
@@ -71,10 +72,10 @@ def safe_transcribe():
     result = model.transcribe(wav_path, fp16=torch.cuda.is_available(), language='ko')
     return result['text']
 
-def extract_keyframes(video_path, fps=1):
+def extract_keyframes(video_path, interval_sec=1):
     cap = cv2.VideoCapture(video_path)
     original_fps = cap.get(cv2.CAP_PROP_FPS)
-    interval = int(original_fps * fps)
+    interval = int(original_fps * interval_sec)
     frames = []
     count = 0
     while cap.isOpened():
@@ -152,7 +153,7 @@ if uploaded_video:
         video_path = tmp.name
     st.video(video_path)
     if st.button("영상 분석 시작", key="start_video_analysis"):
-        frames = extract_keyframes(video_path)
+        frames = extract_keyframes(video_path, interval_sec=1)  # 1초 단위로 변경
         descs = [describe_image_with_blip(Image.open(f)) for f in frames]
         audio_path = os.path.join(UPLOAD_DIR, "extracted_audio.wav")
         subprocess.run(["ffmpeg", "-y", "-i", video_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", audio_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
