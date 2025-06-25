@@ -13,7 +13,7 @@ st.set_page_config(page_title="AI 콘텐츠 분석 시스템", layout="wide")
 st.title("🎬 AI 콘텐츠 분석 시스템")
 prompt_text = st.text_area("분석 프롬프트", "Please analyze the content type, main audience, tone, and suggest 3 improvements.")
 
-# Whisper 음성 텍스트 변환
+# Whisper 변환
 def transcribe_audio_whisper(audio_path):
     model = whisper.load_model("base")
     result = model.transcribe(audio_path, fp16=torch.cuda.is_available())
@@ -53,16 +53,16 @@ def extract_keyframes(video_path, fps=1):
 
 # Ollama 분석
 def analyze_with_ollama(prompt_text):
-    template = PromptTemplate.from_template("""{prompt_text}""")
+    template = PromptTemplate.from_template("{prompt_text}")
     llm = Ollama(model="llama3")
     chain = LLMChain(prompt=template, llm=llm)
     return chain.run(prompt_text=prompt_text)
 
-# 유튜브 다운로드
-def download_youtube_audio(url, output_path="youtube_audio.wav"):
+# 유튜브 오디오 다운로드
+def download_youtube_audio(url):
     ydl_opts = {
         'format': 'bestaudio/best',
-        'outtmpl': output_path,
+        'outtmpl': os.path.join(tempfile.gettempdir(), "youtube_audio.%(ext)s"),
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'wav',
@@ -73,15 +73,6 @@ def download_youtube_audio(url, output_path="youtube_audio.wav"):
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
 
-# 유튜브 다운로드 파일 경로 자동 찾기
-def resolve_audio_path(base="youtube_audio.wav"):
-    if os.path.exists(base):
-        return base
-    alt = base + ".wav"
-    if os.path.exists(alt):
-        return alt
-    raise FileNotFoundError(f"'{base}' 또는 '{alt}' 파일이 존재하지 않습니다.")
-
 # 전체 요약 구성
 def summarize_all_inputs(frames_desc, transcript, title, prompt):
     summary = f"Title: {title}\n\n"
@@ -90,10 +81,10 @@ def summarize_all_inputs(frames_desc, transcript, title, prompt):
     summary += prompt.strip()
     return summary
 
-# 업로드 영역
-uploaded_video = st.file_uploader("영상 파일 업로드", type=["mp4", "mov", "mkv"], key="video")
-uploaded_image = st.file_uploader("이미지 파일 업로드", type=["jpg", "jpeg", "png"], key="image")
-uploaded_audio = st.file_uploader("음성 파일 업로드", type=["wav", "mp3"], key="audio")
+# 업로드 구성
+uploaded_video = st.file_uploader("🎥 영상 파일 업로드", type=["mp4", "mov", "mkv"], key="video")
+uploaded_image = st.file_uploader("🖼️ 이미지 파일 업로드", type=["jpg", "jpeg", "png"], key="image")
+uploaded_audio = st.file_uploader("🎙️ 음성 파일 업로드", type=["wav", "mp3"], key="audio")
 
 # 이미지 분석
 if uploaded_image:
@@ -119,8 +110,7 @@ if uploaded_video:
 
             with st.spinner("Whisper 음성 분석 중..."):
                 audio_path = os.path.join(tempfile.gettempdir(), "audio.wav")
-                subprocess.run(["ffmpeg", "-y", "-i", video_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", audio_path],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(["ffmpeg", "-y", "-i", video_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", audio_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 transcript = transcribe_audio_whisper(audio_path)
 
             with st.spinner("Ollama 분석 중..."):
@@ -145,18 +135,18 @@ if uploaded_audio:
 
 # 유튜브 링크 분석
 st.markdown("---")
-st.subheader("유튜브 링크 또는 로컬 오디오 분석")
+st.subheader("🔗 유튜브 링크 또는 로컬 오디오 분석")
 col1, col2 = st.columns([1, 3])
 with col1:
     mode = st.radio("분석 방식", ["유튜브 링크", "로컬 음성 파일"], horizontal=True)
 with col2:
-    user_input = st.text_input("유튜브 링크를 입력하세요" if mode == "유튜브 링크" else "로컬 경로를 입력하세요")
+    user_input = st.text_input("유튜브 링크를 입력하세요" if mode == "유튜브 링크" else "로컬 오디오 경로 입력")
 
 if st.button("오디오 요약 분석 시작"):
     try:
         if mode == "유튜브 링크":
-            download_youtube_audio(user_input, output_path="youtube_audio.wav")
-            audio_path = resolve_audio_path("youtube_audio.wav")
+            download_youtube_audio(user_input)
+            audio_path = os.path.join(tempfile.gettempdir(), "youtube_audio.wav.wav")  # ✅ 오타 그대로 저장된 파일명
         else:
             audio_path = user_input
 
@@ -167,8 +157,7 @@ if st.button("오디오 요약 분석 시작"):
         st.code(transcript)
         st.write("요약 결과:")
         st.write(result)
-
     except Exception as e:
-        st.error(f"❌ 오류 발생: {e}")
+        st.error(f"❌ 오류 발생: {str(e)}")
 
 st.caption("© 2025 시온마케팅 | 개발자 홍석표")
