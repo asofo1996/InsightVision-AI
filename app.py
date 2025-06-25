@@ -15,7 +15,7 @@ from langchain_core.prompts import PromptTemplate
 
 st.set_page_config(page_title="AI 콘텐츠 분석 시스템", layout="wide")
 st.title("🎬 AI 콘텐츠 분석 시스템")
-prompt_text = st.text_area("분석 프롬프트", "Please analyze the content type, main audience, tone, and suggest 3 improvements.")
+prompt_text = st.text_area("분석 프롬프트", "Please analyze the content type, main audience, tone, and suggest 3 improvements.", key="main_prompt")
 
 UPLOAD_DIR = os.path.join(os.getcwd(), "uploaded")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -101,14 +101,14 @@ def summarize_all_inputs(frames_desc, transcript, title, prompt):
     summary += prompt.strip()
     return summary
 
-uploaded_video = st.file_uploader("영상 업로드", type=["mp4", "mov", "mkv"])
-uploaded_image = st.file_uploader("이미지 업로드", type=["jpg", "jpeg", "png"])
-uploaded_audio = st.file_uploader("음성 업로드", type=["wav", "mp3"])
+uploaded_video = st.file_uploader("영상 업로드", type=["mp4", "mov", "mkv"], key="video_upload")
+uploaded_image = st.file_uploader("이미지 업로드", type=["jpg", "jpeg", "png"], key="image_upload")
+uploaded_audio = st.file_uploader("음성 업로드", type=["wav", "mp3"], key="audio_upload")
 
 if uploaded_image:
     image_obj = Image.open(uploaded_image).convert("RGB")
     st.image(image_obj, caption="업로드한 이미지", use_container_width=True)
-    if st.button("이미지 분석 시작"):
+    if st.button("이미지 분석 시작", key="start_image_analysis"):
         with st.spinner("이미지 설명 및 텍스트 추출 중..."):
             desc = describe_image_with_blip(image_obj)
             extracted_text = extract_text_from_image(image_obj)
@@ -151,7 +151,7 @@ if uploaded_video:
         tmp.write(uploaded_video.read())
         video_path = tmp.name
     st.video(video_path)
-    if st.button("영상 분석 시작"):
+    if st.button("영상 분석 시작", key="start_video_analysis"):
         frames = extract_keyframes(video_path)
         descs = [describe_image_with_blip(Image.open(f)) for f in frames]
         audio_path = os.path.join(UPLOAD_DIR, "extracted_audio.wav")
@@ -167,7 +167,7 @@ if uploaded_audio:
     saved_path = os.path.join(UPLOAD_DIR, f"uploaded_audio{suffix}")
     with open(saved_path, "wb") as f:
         f.write(uploaded_audio.read())
-    if st.button("음성 분석 시작"):
+    if st.button("음성 분석 시작", key="start_audio_analysis"):
         transcript = safe_transcribe()
         result = analyze_with_ollama(f"Transcript:\n{transcript}\n\n{prompt_text}")
         st.subheader("음성 분석 결과")
