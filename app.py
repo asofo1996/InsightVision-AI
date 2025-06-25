@@ -19,7 +19,6 @@ st.set_page_config(page_title="AI 콘텐츠 분석 시스템", layout="wide")
 st.title("🎬 AI 콘텐츠 분석 시스템")
 prompt_text = st.text_area("분석 프롬프트", "Please analyze the content type, main audience, tone, and suggest 3 improvements.")
 
-# 안전한 로컬 저장 디렉토리 생성
 UPLOAD_DIR = os.path.join(os.getcwd(), "uploaded")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -44,18 +43,18 @@ def get_latest_wav_file():
     return wav_files[0] if wav_files else None
 
 def safe_transcribe():
-    path = get_latest_wav_file()
-    if not path or not os.path.exists(path):
+    filepath = get_latest_wav_file()
+    if not filepath or not os.path.exists(filepath):
         raise FileNotFoundError(".wav 파일을 찾을 수 없습니다.")
 
-    st.info(f"🧠 분석할 파일: {path}")
-    waveform, sample_rate = torchaudio.load(path)
+    st.info(f"🧠 분석 대상 파일: {filepath}")
+    waveform, sample_rate = torchaudio.load(filepath)
     if sample_rate != 16000:
         resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
         waveform = resampler(waveform)
     audio = waveform.squeeze().numpy()
     model = whisper.load_model("base")
-    result = model.transcribe(audio, fp16=torch.cuda.is_available())
+    result = model.transcribe(audio, fp16=torch.cuda.is_available(), language='ko')
     return result['text']
 
 def extract_keyframes(video_path, fps=1):
