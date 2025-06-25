@@ -141,7 +141,7 @@ with col2:
 if st.button("오디오 요약 분석 시작"):
     if mode == "유튜브 링크":
         try:
-            audio_path = "youtube_audio.wav"
+            audio_path = "youtube_audio"
             if os.path.exists(audio_path):
                 os.remove(audio_path)
             download_youtube_audio(user_input, output_path=audio_path)
