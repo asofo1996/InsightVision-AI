@@ -21,7 +21,7 @@ prompt_text = st.text_area("분석 프롬프트", "Please analyze the content ty
 UPLOAD_DIR = os.path.join(os.getcwd(), "uploaded")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# Tesseract OCR 경로 지정 (Windows 기본 설치 경로)
+# Tesseract OCR 경로 설정
 pytesseract.pytesseract.tesseract_cmd = r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
 
 @st.cache_resource
@@ -51,7 +51,6 @@ def safe_transcribe():
     filepath = get_latest_wav_file()
     if not filepath or not os.path.exists(filepath):
         raise FileNotFoundError(".wav 파일을 찾을 수 없습니다.")
-
     model = whisper.load_model("base")
     result = model.transcribe(filepath, fp16=torch.cuda.is_available(), language='ko')
     return result['text']
@@ -86,7 +85,6 @@ def summarize_all_inputs(frames_desc, transcript, title, prompt):
     summary += prompt.strip()
     return summary
 
-# 업로드
 uploaded_video = st.file_uploader("영상 업로드", type=["mp4", "mov", "mkv"])
 uploaded_image = st.file_uploader("이미지 업로드", type=["jpg", "jpeg", "png"])
 uploaded_audio = st.file_uploader("음성 업로드", type=["wav", "mp3"])
@@ -101,24 +99,28 @@ if uploaded_image:
 
         image_name = uploaded_image.name
 
-        refined_prompt = f"""아래는 이미지에서 추출한 정보입니다:
+        refined_prompt = f"""다음은 광고 이미지 분석을 위한 정보입니다:
 
-[파일명] {image_name}
+[파일명]
+{image_name}
 
-[BLIP 자동 설명]
+[BLIP 이미지 설명]
 {desc}
 
 [OCR로 추출된 텍스트]
 {extracted_text}
 
-이 이미지는 광고 이미지로 사용될 수 있습니다.
+🔍 아래 항목을 반드시 포함해 광고 전문가로서 분석 및 개선안을 제시해 주세요:
 
-다음 항목을 바탕으로 광고 전문가로서 분석을 수행하고, 개선 아이디어를 제안해주세요:
-1. 문구 전달력 및 클릭 유도 효과
-2. 색상/폰트/배경의 시각적 적합성
-3. 타겟층과 제품 카테고리에 맞는 어필력
-4. 광고 심사 통과 가능성 및 리스크 요인
-5. 전반적 시각/심리적 인상
+1. 파일명으로 추정 가능한 업종, 브랜드, 서비스, 타겟 등
+2. 이미지의 색상, 글꼴, 레이아웃 구성, 텍스트 크기/배치의 전략적 의미
+3. 주목성과 CTA 효과 (ex. 혜택 받기, 제한 조건, 유도 화살표 등)
+4. 톤앤매너 (신뢰, 건강, 활기, 감성 등) 및 감정 유도 요소
+5. 광고 심사 규정 위반 가능성 (과장, 비의료인 사용, 표현 등)
+6. 시각 흐름(상단 강조 → 하단 클릭 유도 등)의 설계 여부
+7. 전체적으로 시청자가 어떤 인식을 하게 되는지 예측
+
+→ 마지막으로, 해당 광고를 보완/개선하기 위한 실질적인 실행 제안을 3가지 해주세요.
 """
 
         with st.spinner("광고 전문가 관점 분석 중..."):
