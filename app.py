@@ -58,7 +58,7 @@ def analyze_with_ollama(prompt_text):
     return chain.run(prompt_text=prompt_text)
 
 # 유튜브 다운로드
-def download_youtube_audio(url, output_path="downloaded_audio.wav.wav"):
+def download_youtube_audio(url, output_path="youtube_audio.wav.wav"):
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': output_path,
@@ -141,7 +141,7 @@ with col2:
 if st.button("오디오 요약 분석 시작"):
     if mode == "유튜브 링크":
         try:
-            audio_path = "downloaded_audio.wav.wav"
+            audio_path = "youtube_audio.wav.wav"
             if os.path.exists(audio_path):
                 os.remove(audio_path)
             download_youtube_audio(user_input, output_path=audio_path)
