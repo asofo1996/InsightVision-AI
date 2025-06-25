@@ -42,7 +42,7 @@ def download_file(service, file_id, filename):
 
 def extract_audio_ffmpeg(video_path):
     audio_path = os.path.join(tempfile.gettempdir(), "audio.wav")
-    command = ["ffmpeg", "-i", video_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", audio_path]
+    command = ["ffmpeg", "-y", "-i", video_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", audio_path]
     subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return audio_path
 
@@ -89,16 +89,21 @@ def analyze_with_ollama(prompt_text):
     chain = LLMChain(prompt=template, llm=llm)
     return chain.run(prompt_text=prompt_text)
 
-def download_youtube_video(youtube_url):
-    temp_file = os.path.join(tempfile.gettempdir(), "youtube_video.mp4")
+def download_youtube_audio_only(youtube_url):
+    output_path = os.path.join(tempfile.gettempdir(), "youtube_audio.wav")
     ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4',
-        'outtmpl': temp_file,
+        'format': 'bestaudio/best',
+        'outtmpl': output_path,
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'wav',
+            'preferredquality': '192',
+        }],
         'quiet': True
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([youtube_url])
-    return temp_file
+    return output_path
 
 st.set_page_config(page_title="Insight Vision AI", layout="wide")
 st.title("AI 분석 시스템")
@@ -119,16 +124,6 @@ uploaded_image = st.file_uploader("이미지 파일 업로드", type=["jpg", "jp
 if uploaded_image:
     image_obj = Image.open(uploaded_image).convert("RGB")
     st.image(image_obj, caption="업로드한 이미지", use_container_width=True)
-
-# 🔄 유튜브 링크 업로드 기능 추가
-youtube_url = st.text_input("또는 YouTube 링크로 업로드")
-if youtube_url:
-    try:
-        with st.spinner("유튜브 영상 다운로드 중..."):
-            video_path = download_youtube_video(youtube_url)
-            st.video(video_path)
-    except Exception as e:
-        st.error(f"유튜브 영상 다운로드 실패: {e}")
 
 if st.button("영상 분석 시작") and video_path:
     with st.spinner("프레임 분석 중..."):
@@ -151,6 +146,34 @@ if st.button("이미지 분석 시작") and image_obj:
     with st.spinner("Ollama 분석 중..."):
         result = analyze_with_ollama(f"Image Description:\n{desc}\n\n{prompt_text}")
         st.subheader("분석 결과")
+        st.write(result)
+
+# ✅ 하단 추가 기능: 음성만 요약 분석
+st.markdown("---")
+st.subheader("🎧 음성 또는 유튜브 링크 요약 분석")
+
+source_type = st.radio("입력 방식", ["유튜브 링크", "로컬 음성 파일"], horizontal=True)
+input_audio_path = None
+
+if source_type == "유튜브 링크":
+    youtube_audio_url = st.text_input("유튜브 링크를 입력하세요")
+    if st.button("오디오 요약 분석 시작") and youtube_audio_url:
+        with st.spinner("유튜브 오디오 다운로드 중..."):
+            input_audio_path = download_youtube_audio_only(youtube_audio_url)
+elif source_type == "로컬 음성 파일":
+    uploaded_audio = st.file_uploader("음성 파일 업로드", type=["mp3", "wav"], key="audio")
+    if uploaded_audio:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+            tmp.write(uploaded_audio.read())
+            input_audio_path = tmp.name
+
+if input_audio_path:
+    with st.spinner("Whisper로 음성 텍스트 변환 중..."):
+        transcript = transcribe_audio_whisper(input_audio_path)
+
+    with st.spinner("Ollama 요약 및 분석 중..."):
+        result = analyze_with_ollama(f"음성 텍스트:\n{transcript}\n\n{prompt_text}")
+        st.subheader("📝 요약 결과")
         st.write(result)
 
 if image_obj is None and video_path is None:
