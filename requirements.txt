@@ -3,6 +3,7 @@ opencv-python-headless
 Pillow
 transformers
 torch
+torchaudio
 whisper
 google-auth
 google-auth-oauthlib
