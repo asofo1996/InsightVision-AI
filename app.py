@@ -10,9 +10,8 @@ import pytesseract
 import whisper
 from PIL import Image
 from transformers import BlipProcessor, BlipForConditionalGeneration
-from langchain_community.llms import Ollama
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
+from langchain_ollama import OllamaLLM
+from langchain_core.prompts import PromptTemplate
 
 st.set_page_config(page_title="AI 콘텐츠 분석 시스템", layout="wide")
 st.title("🎬 AI 콘텐츠 분석 시스템")
@@ -21,7 +20,6 @@ prompt_text = st.text_area("분석 프롬프트", "Please analyze the content ty
 UPLOAD_DIR = os.path.join(os.getcwd(), "uploaded")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# Tesseract OCR 경로 설정
 pytesseract.pytesseract.tesseract_cmd = r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
 
 @st.cache_resource
@@ -92,9 +90,9 @@ def extract_keyframes(video_path, fps=1):
 
 def analyze_with_ollama(prompt_text):
     template = PromptTemplate.from_template("{prompt_text}")
-    llm = Ollama(model="llama3")
-    chain = LLMChain(prompt=template, llm=llm)
-    return chain.run(prompt_text=prompt_text)
+    llm = OllamaLLM(model="llama3")
+    chain = template | llm
+    return chain.invoke({"prompt_text": prompt_text})
 
 def summarize_all_inputs(frames_desc, transcript, title, prompt):
     summary = f"Title: {title}\n\n"
