@@ -6,7 +6,7 @@ import cv2
 import tempfile
 import subprocess
 import torch
-import torchaudio
+import pytesseract
 import whisper
 from PIL import Image
 from transformers import BlipProcessor, BlipForConditionalGeneration
@@ -21,6 +21,9 @@ prompt_text = st.text_area("분석 프롬프트", "Please analyze the content ty
 UPLOAD_DIR = os.path.join(os.getcwd(), "uploaded")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# Tesseract OCR 경로 지정 (Windows 기본 설치 경로)
+pytesseract.pytesseract.tesseract_cmd = r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
+
 @st.cache_resource
 def load_blip():
     processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
@@ -32,6 +35,9 @@ def describe_image_with_blip(pil_image):
     inputs = processor(pil_image, return_tensors="pt")
     out = model.generate(**inputs)
     return processor.decode(out[0], skip_special_tokens=True)
+
+def extract_text_from_image(pil_image):
+    return pytesseract.image_to_string(pil_image, lang='kor+eng')
 
 def get_latest_wav_file():
     wav_files = sorted(
@@ -46,14 +52,8 @@ def safe_transcribe():
     if not filepath or not os.path.exists(filepath):
         raise FileNotFoundError(".wav 파일을 찾을 수 없습니다.")
 
-    st.info(f"🧠 분석 대상 파일: {filepath}")
-    waveform, sample_rate = torchaudio.load(filepath)
-    if sample_rate != 16000:
-        resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
-        waveform = resampler(waveform)
-    audio = waveform.squeeze().numpy()
     model = whisper.load_model("base")
-    result = model.transcribe(audio, fp16=torch.cuda.is_available(), language='ko')
+    result = model.transcribe(filepath, fp16=torch.cuda.is_available(), language='ko')
     return result['text']
 
 def extract_keyframes(video_path, fps=1):
@@ -95,30 +95,33 @@ if uploaded_image:
     image_obj = Image.open(uploaded_image).convert("RGB")
     st.image(image_obj, caption="업로드한 이미지", use_container_width=True)
     if st.button("이미지 분석 시작"):
-        with st.spinner("이미지 설명 생성 중..."):
+        with st.spinner("이미지 설명 및 텍스트 추출 중..."):
             desc = describe_image_with_blip(image_obj)
+            extracted_text = extract_text_from_image(image_obj)
 
         image_name = uploaded_image.name
-        refined_prompt = f"""아래는 BLIP 모델이 생성한 이미지 설명입니다:
 
+        refined_prompt = f"""아래는 이미지에서 추출한 정보입니다:
+
+[파일명] {image_name}
+
+[BLIP 자동 설명]
 {desc}
+
+[OCR로 추출된 텍스트]
+{extracted_text}
 
 이 이미지는 광고 이미지로 사용될 수 있습니다.
 
-다음 항목을 바탕으로 광고 전문가로서 이미지 분석을 수행해 주세요:
-1. 이미지의 파일명: {image_name}
-2. 이미지에 사용된 주요 색상, 배경, 텍스트, 구성 요소
-3. 이미지 내 문구(텍스트)의 전달력과 브랜드 전달 효과
-4. 레이아웃 구성의 시각적 완성도
-5. 타겟 소비자층과의 적합성
-6. SNS, 디스플레이 광고, 배너 광고 등의 활용 적합성
-7. 광고 심사를 통과하기 위한 문구/구성 개선 포인트
-8. 전반적인 Tone & Manner에 대한 평가
-
-위 분석 후, 개선 아이디어 3가지를 제안해 주세요.
+다음 항목을 바탕으로 광고 전문가로서 분석을 수행하고, 개선 아이디어를 제안해주세요:
+1. 문구 전달력 및 클릭 유도 효과
+2. 색상/폰트/배경의 시각적 적합성
+3. 타겟층과 제품 카테고리에 맞는 어필력
+4. 광고 심사 통과 가능성 및 리스크 요인
+5. 전반적 시각/심리적 인상
 """
 
-        with st.spinner("Ollama 광고 분석 중..."):
+        with st.spinner("광고 전문가 관점 분석 중..."):
             result = analyze_with_ollama(refined_prompt)
 
         st.success("✅ 이미지 광고 분석 완료")
