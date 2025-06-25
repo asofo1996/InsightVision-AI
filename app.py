@@ -1,115 +1,98 @@
-import os
-import tempfile
 import streamlit as st
-from PIL import Image
-import whisper
+import os, tempfile, shutil, subprocess
 import torch
+import whisper
 import yt_dlp
-import ffmpeg
-from transformers import BlipProcessor, BlipForConditionalGeneration
-from langchain_community.llms import Ollama
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
-from pydub import AudioSegment
+from transformers import pipeline
 
-# ---- SETUP ----
-st.set_page_config(page_title="AI 분석 시스템", layout="wide")
+st.set_page_config(page_title="AI 콘텐츠 분석 시스템", layout="wide")
 st.title("AI 분석 시스템")
 
-ASSEMBLY_AI_KEY = st.secrets.get("ASSEMBLYAI_API_KEY", "")  # 향후 사용 예정
-
-# ---- LOAD BLIP ----
 @st.cache_resource
-def load_blip():
-    processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
-    model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
-    return processor, model
+def load_whisper_model():
+    return whisper.load_model("base")
 
-# ---- IMAGE DESCRIPTION ----
-def describe_image(image):
-    processor, model = load_blip()
-    inputs = processor(image, return_tensors="pt")
-    output = model.generate(**inputs)
-    return processor.decode(output[0], skip_special_tokens=True)
+@st.cache_resource
+def load_summarizer():
+    return pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
 
-# ---- AUDIO TRANSCRIPTION ----
-def transcribe_audio_whisper(audio_path):
-    model = whisper.load_model("base")
-    result = model.transcribe(audio_path, fp16=torch.cuda.is_available())
-    return result['text']
-
-# ---- OLLAMA ----
-def analyze_with_ollama(prompt_text):
-    template = PromptTemplate.from_template("""{prompt_text}""")
-    llm = Ollama(model="llama3")
-    chain = LLMChain(prompt=template, llm=llm)
-    return chain.run(prompt_text=prompt_text)
-
-# ---- DOWNLOAD YOUTUBE ----
-def download_youtube_audio(youtube_url):
+def download_youtube_audio(url):
     temp_dir = tempfile.mkdtemp()
-    audio_path = os.path.join(temp_dir, "downloaded_audio.mp3")
+    mp3_path = os.path.join(temp_dir, "youtube_audio.mp3")
+    wav_path = os.path.join(temp_dir, "youtube_audio.wav")
+
+    if os.path.exists(mp3_path): os.remove(mp3_path)
+    if os.path.exists(wav_path): os.remove(wav_path)
+
     ydl_opts = {
         'format': 'bestaudio/best',
-        'outtmpl': audio_path,
-        'quiet': True,
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }]
+        'outtmpl': mp3_path,
+        'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3'}]
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([youtube_url])
-    return audio_path
+        ydl.download([url])
 
-# ---- AUDIO NORMALIZATION ----
-def convert_audio_to_wav(mp3_path):
-    wav_path = mp3_path.replace(".mp3", ".wav")
-    AudioSegment.from_mp3(mp3_path).export(wav_path, format="wav")
+    subprocess.run(["ffmpeg", "-y", "-i", mp3_path, "-ac", "1", "-ar", "16000", wav_path],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
     return wav_path
 
-# ---- UI: 분석 프롬프트 ----
+def transcribe_audio(path):
+    model = load_whisper_model()
+    result = model.transcribe(path)
+    return result["text"]
+
+def summarize_text(text):
+    summarizer = load_summarizer()
+    chunks = [text[i:i+1000] for i in range(0, len(text), 1000)]
+    summaries = [summarizer(chunk)[0]['summary_text'] for chunk in chunks]
+    return " ".join(summaries)
+
+def analyze_audio(input_audio_path):
+    full_text = transcribe_audio(input_audio_path)
+    summary = summarize_text(full_text)
+    return full_text, summary
+
+# --- 인터페이스 구성 ---
+st.subheader("분석 해석 (선택)")
 prompt_text = st.text_area("분석 프롬프트", "Please analyze the content type, main audience, tone, and suggest 3 improvements.")
 
-# ---- 유튜브 or 파일 ----
-st.subheader("🎧 오디오 요약 분석")
-option = st.radio("", ["유튜브 링크", "로컬 음성 파일"])
-youtube_url = ""
-local_audio = None
+st.divider()
+st.subheader("유튜브 또는 오디오 파일 업로드")
 
-if option == "유튜브 링크":
-    youtube_url = st.text_input("유튜브 링크를 입력하세요")
-else:
-    local_audio = st.file_uploader("로컬 음성/영상 파일 업로드 (mp3/mp4)", type=["mp3", "mp4"])
+mode = st.radio("입력 방식", ["유튜브 링크", "로컬 음성 파일"])
 
-if st.button("🧠 오디오 요약 분석 시작"):
-    with st.spinner("🔊 오디오 다운로드 및 처리 중..."):
-        try:
-            audio_path = ""
-            if youtube_url:
-                mp3_path = download_youtube_audio(youtube_url)
-                audio_path = convert_audio_to_wav(mp3_path)
-            elif local_audio:
-                suffix = ".mp4" if local_audio.name.endswith("mp4") else ".mp3"
-                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                    tmp.write(local_audio.read())
-                    tmp_path = tmp.name
-                audio_path = convert_audio_to_wav(tmp_path) if suffix == ".mp3" else tmp_path
-            else:
-                st.warning("파일 또는 링크를 올바르게 입력하세요.")
-                st.stop()
+if mode == "유튜브 링크":
+    url = st.text_input("YouTube 링크")
+    if st.button("오디오 요약 분석 시작") and url:
+        with st.spinner("🔄 유튜브에서 오디오 추출 및 분석 중..."):
+            try:
+                audio_path = download_youtube_audio(url)
+                full, summ = analyze_audio(audio_path)
+                st.success("✅ 분석 완료")
+                st.subheader("전체 녹취본 텍스트")
+                st.text_area("📝 전체 텍스트", full, height=300)
+                st.subheader("요약 결과")
+                st.info(summ)
+            except Exception as e:
+                st.error(f"❌ 오류 발생: {e}")
 
-            st.info("🔎 Whisper로 전체 텍스트 변환 중...")
-            transcript = transcribe_audio_whisper(audio_path)
-            st.text_area("전체 텍스트", transcript, height=200)
-
-            st.info("✍️ 요약 및 인사이트 분석 중...")
-            result = analyze_with_ollama(f"Please summarize and analyze the following transcript:\n{transcript}\n\n{prompt_text}")
-            st.subheader("요약 및 분석 결과")
-            st.write(result)
-
-        except Exception as e:
-            st.error(f"오류 발생: {e}")
+elif mode == "로컬 음성 파일":
+    uploaded_file = st.file_uploader("오디오 파일 업로드 (mp3 또는 wav)", type=["mp3", "wav"])
+    if st.button("오디오 요약 분석 시작") and uploaded_file:
+        with st.spinner("📂 오디오 분석 중..."):
+            try:
+                temp_dir = tempfile.mkdtemp()
+                file_path = os.path.join(temp_dir, uploaded_file.name)
+                with open(file_path, "wb") as f:
+                    f.write(uploaded_file.read())
+                full, summ = analyze_audio(file_path)
+                st.success("✅ 분석 완료")
+                st.subheader("전체 녹취본 텍스트")
+                st.text_area("📝 전체 텍스트", full, height=300)
+                st.subheader("요약 결과")
+                st.info(summ)
+            except Exception as e:
+                st.error(f"❌ 오류 발생: {e}")
 
 st.caption("© 2025 시온마케팅 | 개발자 홍석표")
