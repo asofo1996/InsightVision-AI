@@ -38,45 +38,39 @@ def describe_image_with_blip(pil_image):
     out = model.generate(**inputs)
     return processor.decode(out[0], skip_special_tokens=True)
 
-def get_latest_wav_file():
-    wav_files = sorted(
-        glob.glob(os.path.join(UPLOAD_DIR, "*.wav")),
-        key=os.path.getmtime,
-        reverse=True
-    )
-    return wav_files[0] if wav_files else None
-
-def safe_transcribe():
-    filepath = get_latest_wav_file()
+# --- 💥 1. 핵심 변경: 다양한 오디오 확장자를 찾는 함수 ---
+def get_latest_audio_file():
+    """업로드 디렉토리에서 가장 최근의 오디오 파일을 찾아 경로를 반환 (.wav, .m4a, .webm, .mp3 등)"""
+    supported_extensions = ["*.wav", "*.mp3", "*.m4a", "*.webm", "*.mp4"]
+    all_audio_files = []
+    for ext in supported_extensions:
+        all_audio_files.extend(glob.glob(os.path.join(UPLOAD_DIR, ext)))
     
-    # 디버깅: 찾은 파일 경로 확인
-    if filepath:
-        st.info(f"✅ Whisper가 분석할 오디오 파일을 찾았습니다: {filepath}")
-    else:
-        st.error("❌ Whisper가 분석할 .wav 파일을 'uploaded' 폴더에서 찾지 못했습니다.")
-        # 디버깅: 현재 폴더 내용물 확인
+    if not all_audio_files:
+        return None
+        
+    latest_file = max(all_audio_files, key=os.path.getmtime)
+    return latest_file
+
+# --- 💥 2. 핵심 변경: 새로 만든 함수를 사용하도록 수정 ---
+def safe_transcribe():
+    """오디오 파일을 안전하게 텍스트로 변환 (Whisper 사용)"""
+    filepath = get_latest_audio_file() # 새로운 함수 호출
+    if not filepath or not os.path.exists(filepath):
+        st.error(f"❌ 분석할 오디오 파일을 'uploaded' 폴더에서 찾지 못했습니다. 지원 형식: .wav, .mp3, .m4a, .webm 등")
         st.warning(f"'uploaded' 폴더 내용물: {os.listdir(UPLOAD_DIR)}")
-        raise FileNotFoundError(".wav 파일을 찾을 수 없습니다.")
+        raise FileNotFoundError("분석할 오디오 파일을 찾을 수 없습니다.")
 
-    if not os.path.exists(filepath):
-         raise FileNotFoundError(f"파일 경로가 존재하지 않습니다: {filepath}")
-
+    st.info(f"🧠 분석 대상 오디오 파일: {filepath}")
+    
     try:
-        waveform, sample_rate = torchaudio.load(filepath)
-        if sample_rate != 16000:
-            resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
-            waveform = resampler(waveform)
-        
-        audio = waveform.squeeze().numpy()
-        
         model = whisper.load_model("base")
-        result = model.transcribe(audio, fp16=torch.cuda.is_available(), language='ko')
+        # Whisper의 transcribe 함수에 파일 경로를 직접 넘겨주면 ffmpeg을 통해 자동으로 처리됩니다.
+        result = model.transcribe(filepath, fp16=torch.cuda.is_available(), language='ko')
         return result['text']
     except Exception as e:
         st.error(f"오디오 파일 처리 중 오류 발생: {e}")
-        # 오류 발생 시 더 상세한 정보 제공
-        raise RuntimeError(f"torchaudio 또는 Whisper에서 '{filepath}' 파일을 처리하는 데 실패했습니다.") from e
-
+        raise RuntimeError(f"Whisper에서 '{filepath}' 파일을 처리하는 데 실패했습니다.") from e
 
 def extract_keyframes(video_path, fps=1):
     cap = cv2.VideoCapture(video_path)
@@ -110,31 +104,29 @@ def summarize_all_inputs(frames_desc, transcript, title, prompt):
     summary += prompt.strip()
     return summary
 
+# --- 💥 3. 핵심 변경: postprocessors 제거 ---
 def download_youtube_audio(url):
-    out_base = os.path.join(UPLOAD_DIR, "youtube_audio")
+    """yt-dlp를 사용하여 유튜브 오디오를 원본 형식 그대로 다운로드"""
+    out_path_template = os.path.join(UPLOAD_DIR, "youtube_audio.%(ext)s")
     
     ydl_opts = {
         'format': 'bestaudio/best',
-        'outtmpl': out_base, # 확장자 없이 경로 지정
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'wav',
-        }],
-        'quiet': False, # 디버깅을 위해 상세 로그 출력
+        'outtmpl': out_path_template,
+        # 'postprocessors' 옵션을 완전히 제거하여 WAV 변환 과정을 생략합니다.
+        'quiet': False,
         'noplaylist': True
     }
-    st.info("yt-dlp로 오디오 다운로드를 시작합니다...")
+    st.info("yt-dlp로 오디오 다운로드를 시작합니다 (원본 형식 유지)...")
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
-    st.success("오디오 다운로드 및 변환 완료.")
-    
-    # 디버깅: 다운로드 후 폴더 내용 확인
+    st.success("오디오 다운로드 완료.")
     st.info(f"다운로드 완료 후 'uploaded' 폴더 내용: {os.listdir(UPLOAD_DIR)}")
 
 
-# --- Streamlit UI 구성 ---
+# --- Streamlit UI 구성 (이하 코드는 이전과 거의 동일) ---
 st.subheader("파일 직접 업로드하여 분석")
-# (이전과 동일한 파일 업로드 UI 코드는 생략)
+uploaded_video = st.file_uploader("영상 업로드", type=["mp4", "mov", "mkv"])
+# (이하 이미지, 영상, 음성 업로드 및 분석 UI는 생략)
 
 st.markdown("---")
 st.subheader("유튜브 링크 또는 로컬 오디오 파일 경로로 분석")
@@ -169,6 +161,6 @@ if st.button("오디오 요약 분석 시작"):
 
     except Exception as e:
         st.error(f"최상위 오류 발생: {e}")
-        st.exception(e) # 전체 Traceback을 화면에 출력
+        st.exception(e)
 
 st.caption("© 2025 시온마케팅 | 개발자 홍석표")
