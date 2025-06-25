@@ -12,4 +12,3 @@ langchain-community
 ffmpeg-python
 requests
 ollama
-yt-dlp
