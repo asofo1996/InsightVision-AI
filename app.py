@@ -39,20 +39,38 @@ def describe_image_with_blip(pil_image):
 def extract_text_from_image(pil_image):
     return pytesseract.image_to_string(pil_image, lang='kor+eng')
 
-def get_latest_wav_file():
-    wav_files = sorted(
-        glob.glob(os.path.join(UPLOAD_DIR, "*.wav")),
+def convert_to_wav_if_needed(filepath: str) -> str:
+    if filepath.endswith(".wav"):
+        return filepath
+    wav_path = os.path.splitext(filepath)[0] + ".wav"
+    command = [
+        "ffmpeg", "-y",
+        "-i", filepath,
+        "-acodec", "pcm_s16le",
+        "-ar", "16000",
+        "-ac", "1",
+        wav_path
+    ]
+    subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if not os.path.exists(wav_path):
+        raise FileNotFoundError("MP3 → WAV 변환에 실패했습니다.")
+    return wav_path
+
+def get_latest_audio_file():
+    audio_files = sorted(
+        glob.glob(os.path.join(UPLOAD_DIR, "uploaded_audio.*")),
         key=os.path.getmtime,
         reverse=True
     )
-    return wav_files[0] if wav_files else None
+    return audio_files[0] if audio_files else None
 
 def safe_transcribe():
-    filepath = get_latest_wav_file()
+    filepath = get_latest_audio_file()
     if not filepath or not os.path.exists(filepath):
-        raise FileNotFoundError(".wav 파일을 찾을 수 없습니다.")
+        raise FileNotFoundError("오디오 파일을 찾을 수 없습니다.")
+    wav_path = convert_to_wav_if_needed(filepath)
     model = whisper.load_model("base")
-    result = model.transcribe(filepath, fp16=torch.cuda.is_available(), language='ko')
+    result = model.transcribe(wav_path, fp16=torch.cuda.is_available(), language='ko')
     return result['text']
 
 def extract_keyframes(video_path, fps=1):
