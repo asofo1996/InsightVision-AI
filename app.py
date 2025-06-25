@@ -109,7 +109,7 @@ if uploaded_image:
     image_obj = Image.open(uploaded_image).convert("RGB")
     st.image(image_obj, caption="업로드한 이미지", use_container_width=True)
     if st.button("이미지 분석 시작", key="start_image_analysis"):
-        with st.spinner("이미지 설명 및 텍스트 추출 중..."):
+        with st.spinner("이미지 설명 및 텍스트 추출 중."):
             desc = describe_image_with_blip(image_obj)
             extracted_text = extract_text_from_image(image_obj)
 
@@ -130,16 +130,14 @@ if uploaded_image:
 
 1. 파일명으로 추정 가능한 업종, 브랜드, 서비스, 타겟 등
 2. 이미지의 색상, 글꼴, 레이아웃 구성, 텍스트 크기/배치의 전략적 의미
-3. 주목성과 CTA 효과 (ex. 혜택 받기, 제한 조건, 유도 화살표 등)
-4. 톤앤매너 (신뢰, 건강, 활기, 감성 등) 및 감정 유도 요소
-5. 광고 심사 규정 위반 가능성 (과장, 비의료인 사용, 표현 등)
-6. 시각 흐름(상단 강조 → 하단 클릭 유도 등)의 설계 여부
-7. 전체적으로 시청자가 어떤 인식을 하게 되는지 예측
-
-→ 마지막으로, 해당 광고를 보완/개선하기 위한 실질적인 실행 제안을 3가지 해주세요.
+3. 주목성과 CTA 효과
+4. 톤앤매너 및 감정 유도 요소
+5. 광고 심사 규정 위반 가능성
+6. 시각 흐름 및 인식 설계
+7. 보완을 위한 구체적 실행 제안 3가지
 """
 
-        with st.spinner("광고 전문가 관점 분석 중..."):
+        with st.spinner("광고 전문가 관점 분석 중."):
             result = analyze_with_ollama(refined_prompt)
 
         st.success("✅ 이미지 광고 분석 완료")
@@ -152,14 +150,14 @@ if uploaded_video:
         video_path = tmp.name
     st.video(video_path)
     if st.button("영상 분석 시작", key="start_video_analysis"):
-        frames = extract_keyframes(video_path)
+        frames = extract_keyframes(video_path, fps=1)
         descs = [describe_image_with_blip(Image.open(f)) for f in frames]
         audio_path = os.path.join(UPLOAD_DIR, "extracted_audio.wav")
         subprocess.run(["ffmpeg", "-y", "-i", video_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", audio_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         transcript = safe_transcribe()
         final_prompt = summarize_all_inputs(descs, transcript, os.path.basename(video_path), prompt_text)
         result = analyze_with_ollama(final_prompt)
-        st.subheader("영상 분석 결과")
+        st.subheader("📽 영상 분석 결과")
         st.write(result)
 
 if uploaded_audio:
@@ -170,7 +168,7 @@ if uploaded_audio:
     if st.button("음성 분석 시작", key="start_audio_analysis"):
         transcript = safe_transcribe()
         result = analyze_with_ollama(f"Transcript:\n{transcript}\n\n{prompt_text}")
-        st.subheader("음성 분석 결과")
+        st.subheader("🎙 음성 분석 결과")
         st.code(transcript)
         st.write(result)
 
