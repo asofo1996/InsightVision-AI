@@ -7,8 +7,8 @@ from transformers import BlipProcessor, BlipForConditionalGeneration
 from langchain_community.llms import Ollama
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
-import glob
 
+# 기본 설정
 st.set_page_config(page_title="AI 콘텐츠 분석 시스템", layout="wide")
 st.title("🎬 AI 콘텐츠 분석 시스템")
 prompt_text = st.text_area("분석 프롬프트", "Please analyze the content type, main audience, tone, and suggest 3 improvements.")
@@ -48,7 +48,7 @@ def extract_keyframes(video_path, fps=1):
     return frames
 
 def analyze_with_ollama(prompt_text):
-    template = PromptTemplate.from_template("""{prompt_text}""")
+    template = PromptTemplate.from_template("{prompt_text}")
     llm = Ollama(model="llama3")
     chain = LLMChain(prompt=template, llm=llm)
     return chain.run(prompt_text=prompt_text)
@@ -75,12 +75,12 @@ def download_youtube_audio(url):
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
 
-    # 자동으로 확장자 중복된 파일 탐색 (e.g., youtube_audio.wav.wav)
-    candidates = glob.glob(os.path.join(tempfile.gettempdir(), "youtube_audio*.wav"))
-    if candidates:
-        return candidates[0]
+    # 중복 확장자 허용: youtube_audio.wav.wav
+    expected_path = os.path.join(tempfile.gettempdir(), "youtube_audio.wav.wav")
+    if os.path.exists(expected_path):
+        return expected_path
     else:
-        raise FileNotFoundError("다운로드된 wav 파일을 찾을 수 없습니다.")
+        raise FileNotFoundError("youtube_audio.wav.wav 파일이 생성되지 않았습니다.")
 
 # 업로드 인터페이스
 uploaded_video = st.file_uploader("영상 파일 업로드", type=["mp4", "mov", "mkv"], key="video")
@@ -133,7 +133,7 @@ if uploaded_audio:
 
 # 유튜브 링크 입력
 st.markdown("---")
-st.subheader("유튜브 링크 또는 로컬 오디오 분석")
+st.subheader("유튜브 링크 또는 로컬 음성 분석")
 col1, col2 = st.columns([1, 3])
 with col1:
     mode = st.radio("분석 방식", ["유튜브 링크", "로컬 음성 파일"], horizontal=True)
@@ -145,7 +145,6 @@ if st.button("오디오 요약 분석 시작"):
         if mode == "유튜브 링크":
             with st.spinner("유튜브 오디오 다운로드 중..."):
                 audio_path = download_youtube_audio(user_input)
-
         else:
             audio_path = user_input
             if not os.path.exists(audio_path):
