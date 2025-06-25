@@ -1,5 +1,5 @@
 import streamlit as st
-import os, tempfile, subprocess, cv2, torch
+import os, tempfile, cv2, torch, subprocess
 from PIL import Image
 import whisper
 import yt_dlp
@@ -8,18 +8,11 @@ from langchain_community.llms import Ollama
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 
-# 설정
-st.set_page_config(page_title="AI 콘텐츠 분석 시스템", layout="wide")
-st.title("🎬 AI 콘텐츠 분석 시스템")
-prompt_text = st.text_area("분석 프롬프트", "Please analyze the content type, main audience, tone, and suggest 3 improvements.")
+st.set_page_config(page_title="AI 연산 및 녹음 방송 분석", layout="wide")
+st.title("🎬 AI 연산 및 녹음 방송 분석 시스템")
 
-# Whisper 텍스트 변환
-def transcribe_audio_whisper(audio_path):
-    model = whisper.load_model("base")
-    result = model.transcribe(audio_path, fp16=torch.cuda.is_available())
-    return result['text']
+prompt_text = st.text_area("호출할 방식을 입력해주세요", "Please analyze the content type, main audience, tone, and suggest 3 improvements.")
 
-# BLIP 이미지 설명
 @st.cache_resource
 def load_blip():
     processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
@@ -32,7 +25,6 @@ def describe_image_with_blip(pil_image):
     out = model.generate(**inputs)
     return processor.decode(out[0], skip_special_tokens=True)
 
-# 프레임 추출
 def extract_keyframes(video_path, fps=1):
     cap = cv2.VideoCapture(video_path)
     original_fps = cap.get(cv2.CAP_PROP_FPS)
@@ -50,60 +42,61 @@ def extract_keyframes(video_path, fps=1):
     cap.release()
     return frames
 
-# Ollama 분석
 def analyze_with_ollama(prompt_text):
-    template = PromptTemplate.from_template("{prompt_text}")
+    template = PromptTemplate.from_template("""{prompt_text}""")
     llm = Ollama(model="llama3")
     chain = LLMChain(prompt=template, llm=llm)
     return chain.run(prompt_text=prompt_text)
 
-# 유튜브 오디오 다운로드
+def transcribe_audio_whisper(audio_path):
+    model = whisper.load_model("base")
+    result = model.transcribe(audio_path, fp16=torch.cuda.is_available())
+    return result['text']
+
 def download_youtube_audio(url):
-    audio_file = "youtube_audio.wav"
-    if os.path.exists(audio_file):
-        os.remove(audio_file)
+    base_name = "youtube_audio"
+    out_path = base_name
+    
+    if os.path.exists(out_path + ".wav"):
+        os.remove(out_path + ".wav")
 
     ydl_opts = {
         'format': 'bestaudio/best',
-        'outtmpl': 'youtube_audio.%(ext)s',
+        'outtmpl': out_path,
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'wav',
-            'preferredquality': '192',
         }],
         'prefer_ffmpeg': True,
-        'quiet': True
+        'quiet': True,
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
 
-    return audio_file
+    actual_file = out_path + ".wav"
+    return actual_file
 
-# 전체 요약
 def summarize_all_inputs(frames_desc, transcript, title, prompt):
     summary = f"Title: {title}\n\n"
-    summary += "Frame Descriptions:\n" + "\n".join([f"{i+1}. {desc}" for i, desc in enumerate(frames_desc)]) + "\n\n"
+    summary += "Frame Descriptions (1s):\n" + "\n".join([f"{i+1}. {desc}" for i, desc in enumerate(frames_desc)]) + "\n\n"
     summary += f"Transcript:\n{transcript}\n\n"
     summary += prompt.strip()
     return summary
 
-# 파일 업로드
-uploaded_video = st.file_uploader("🎥 영상 파일 업로드", type=["mp4", "mov", "mkv"], key="video")
-uploaded_image = st.file_uploader("🖼 이미지 파일 업로드", type=["jpg", "jpeg", "png"], key="image")
-uploaded_audio = st.file_uploader("🎤 음성 파일 업로드", type=["wav", "mp3"], key="audio")
+uploaded_video = st.file_uploader("영상 파일 업로드", type=["mp4", "mov", "mkv"], key="video")
+uploaded_image = st.file_uploader("이미지 파일 업로드", type=["jpg", "jpeg", "png"], key="image")
+uploaded_audio = st.file_uploader("음성 파일 업로드", type=["wav", "mp3"], key="audio")
 
-# 이미지 처리
 if uploaded_image:
     image_obj = Image.open(uploaded_image).convert("RGB")
     st.image(image_obj, caption="업로드한 이미지", use_container_width=True)
     if st.button("이미지 분석 시작"):
         desc = describe_image_with_blip(image_obj)
         result = analyze_with_ollama(f"Image:\n{desc}\n\n{prompt_text}")
-        st.subheader("이미지 분석 결과")
+        st.subheader(":mag: 이미지 분석 결과")
         st.write(result)
 
-# 영상 처리
 if uploaded_video:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
         tmp.write(uploaded_video.read())
@@ -111,22 +104,23 @@ if uploaded_video:
         st.video(video_path)
 
         if st.button("영상 분석 시작"):
-            with st.spinner("🎞 프레임 분석 중..."):
+            with st.spinner(":scissors: 프레임 분석 중..."):
                 frames = extract_keyframes(video_path)
                 descriptions = [describe_image_with_blip(Image.open(f)) for f in frames]
 
-            with st.spinner("🔊 Whisper 음성 분석 중..."):
-                audio_path = os.path.join(tempfile.gettempdir(), "video_audio.wav")
-                subprocess.run(["ffmpeg", "-y", "-i", video_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", audio_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            with st.spinner(":sound: Whisper를 통한 음성 분석 중..."):
+                audio_path = os.path.join(tempfile.gettempdir(), "audio.wav")
+                subprocess.run([
+                    "ffmpeg", "-y", "-i", video_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", audio_path
+                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 transcript = transcribe_audio_whisper(audio_path)
 
-            with st.spinner("🧠 Ollama 종합 분석 중..."):
+            with st.spinner(":robot_face: Ollama 분석 중..."):
                 final_prompt = summarize_all_inputs(descriptions, transcript, os.path.basename(video_path), prompt_text)
                 result = analyze_with_ollama(final_prompt)
-                st.subheader("🎬 영상 분석 결과")
+                st.subheader(":chart_with_upwards_trend: 영상 분석 결과")
                 st.write(result)
 
-# 오디오 처리
 if uploaded_audio:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
         tmp.write(uploaded_audio.read())
@@ -134,22 +128,21 @@ if uploaded_audio:
         if st.button("음성 파일 분석 시작"):
             transcript = transcribe_audio_whisper(audio_path)
             result = analyze_with_ollama(f"Transcript:\n{transcript}\n\n{prompt_text}")
-            st.subheader("🎧 음성 분석 결과")
-            st.write("전체 텍스트:")
+            st.subheader(":studio_microphone: 음성 분석 결과")
+            st.write(":page_facing_up: 전체 텍스트:")
             st.code(transcript)
-            st.write("요약 결과:")
+            st.write(":bulb: 요약 결과:")
             st.write(result)
 
-# 유튜브 분석 모듈
 st.markdown("---")
-st.subheader("📡 유튜브 또는 로컬 오디오 분석")
+st.subheader(":globe_with_meridians: 유튜브 링크 또는 로컴 음성 분석")
 col1, col2 = st.columns([1, 3])
 with col1:
-    mode = st.radio("분석 대상", ["유튜브 링크", "로컬 경로 입력"], horizontal=True)
+    mode = st.radio(":round_pushpin: 방식", ["유튜브 링크", "로컴 음성 파일"], horizontal=True)
 with col2:
-    user_input = st.text_input("유튜브 링크 또는 로컬 경로를 입력하세요")
+    user_input = st.text_input("유튜브 URL" if mode == "유튜브 링크" else "음성 파일 경로")
 
-if st.button("오디오 요약 분석 시작"):
+if st.button(":arrow_forward: 음성 분석 시작"):
     try:
         audio_path = None
         if mode == "유튜브 링크":
@@ -159,12 +152,12 @@ if st.button("오디오 요약 분석 시작"):
 
         transcript = transcribe_audio_whisper(audio_path)
         result = analyze_with_ollama(f"Transcript:\n{transcript}\n\n{prompt_text}")
-        st.success("📝 오디오 분석 완료")
-        st.write("전체 텍스트:")
+        st.success(":white_check_mark: 음성 분석 완료")
+        st.write(":page_facing_up: 전체 텍스트:")
         st.code(transcript)
-        st.write("요약 결과:")
+        st.write(":bulb: 요약 결과:")
         st.write(result)
     except Exception as e:
-        st.error(f"❌ 오류 발생: {str(e)}")
+        st.error(f":x: 오류 발생: {str(e)}")
 
-st.caption("© 2025 시온마케팅 | 개발자 홍석표")
+st.caption("© 2025 시온링트 | 개발자 홍석표")
