@@ -1,15 +1,28 @@
+# Streamlit & 기본
 streamlit
-opencv-python-headless
+requests
 Pillow
-transformers
+opencv-python-headless
+
+# Whisper 및 음성 처리
+whisper
 torch
 torchaudio
-whisper
+ffmpeg-python
+
+# 이미지 분석 (BLIP)
+transformers
+
+# LangChain & Ollama
+langchain
+langchain-community
+ollama
+
+# Supabase 연동
+supabase
+python-dotenv
+
+# Google API (선택 기능 대비 포함)
 google-auth
 google-auth-oauthlib
 google-api-python-client
-langchain
-langchain-community
-ffmpeg-python
-requests
-ollama
