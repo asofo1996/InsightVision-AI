@@ -6,15 +6,50 @@ from transformers import BlipProcessor, BlipForConditionalGeneration
 from langchain_community.llms import Ollama
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
+from datetime import datetime
+import re
+from supabase import create_client
+
+# 📦 Supabase 연동
+SUPABASE_URL = os.getenv("SUPABASE_URL") or "https://ejdjhdohqvwrizrrocs.supabase.co"
+SUPABASE_KEY = os.getenv("SUPABASE_KEY") or "your-service-role-key-here"
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# ✅ 고객사명 추출
+def extract_client_name(filename):
+    match = re.match(r"([A-Za-z0-9]+)_", filename)
+    return match.group(1) if match else "UnknownClient"
+
+# ✅ DB 저장 함수
+def save_analysis_to_db(client_name, file_name, summary, transcript, descriptions, prompt_text):
+    supabase.table("analysis_results").insert({
+        "client_name": client_name,
+        "content_type": "video",
+        "file_name": file_name,
+        "summary_text": summary,
+        "raw_transcript": transcript,
+        "frame_descriptions": descriptions,
+        "prompt_used": prompt_text,
+        "created_at": datetime.utcnow().isoformat()
+    }).execute()
+
+def save_performance_to_db(client_name, file_name, views, clicks, conversion, ctr):
+    supabase.table("performance_logs").insert({
+        "client_name": client_name,
+        "file_name": file_name,
+        "views": views,
+        "clicks": clicks,
+        "conversion": conversion,
+        "ctr": ctr,
+        "recorded_at": datetime.utcnow().isoformat()
+    }).execute()
 
 # 앱 설정
 st.set_page_config(page_title="시온마케팅 콘텐츠 분석기", layout="wide")
 st.title("🎯 시온마케팅 AI 콘텐츠 분석 시스템")
 st.markdown("---")
 
-# 사용자 입력
-prompt_text = st.text_area("분석 프롬프트", 
-    "Please analyze the content type, main audience, tone, and suggest 3 improvements.", key="main_prompt")
+prompt_text = st.text_area("분석 프롬프트", "Please analyze the content type, main audience, tone, and suggest 3 improvements.", key="main_prompt")
 
 # 모델 불러오기
 @st.cache_resource
@@ -100,9 +135,13 @@ if uploaded_video:
         with st.spinner("🧠 Ollama 분석 중..."):
             final_prompt = summarize_all_inputs(descriptions, transcript, os.path.basename(video_path), prompt_text)
             result = analyze_with_ollama(final_prompt)
-            st.success("영상 분석 완료 ✅")
-            st.subheader("🧠 분석 결과")
-            st.write(result)
+
+        client_name = extract_client_name(os.path.basename(video_path))
+        save_analysis_to_db(client_name, os.path.basename(video_path), result, transcript, descriptions, prompt_text)
+
+        st.success("영상 분석 완료 ✅")
+        st.subheader("🧠 분석 결과")
+        st.write(result)
 
 # 음성 분석
 if uploaded_audio:
@@ -124,6 +163,22 @@ if uploaded_audio:
         st.code(transcript)
         st.write("요약 결과:")
         st.write(result)
+
+# 📊 광고 성과 수동 입력 폼
+st.markdown("---")
+st.header("📊 광고 성과 수동 입력")
+with st.form("performance_form"):
+    perf_file_name = st.text_input("파일명 (예: SionMarketing_광고영상_06월)", "")
+    perf_client_name = extract_client_name(perf_file_name)
+    views = st.number_input("조회수", min_value=0)
+    clicks = st.number_input("클릭수", min_value=0)
+    conversion = st.number_input("전환수", min_value=0)
+    ctr = round((clicks / views) * 100, 2) if views else 0.0
+
+    submitted = st.form_submit_button("성과 데이터 저장")
+    if submitted and perf_file_name:
+        save_performance_to_db(perf_client_name, perf_file_name, views, clicks, conversion, ctr)
+        st.success(f"{perf_client_name} 성과 데이터 저장 완료 ✅")
 
 # 푸터
 st.markdown("---")
