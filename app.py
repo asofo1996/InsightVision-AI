@@ -7,12 +7,14 @@ from langchain_community.llms import Ollama
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 from datetime import datetime
+from dotenv import load_dotenv
 import re
 from supabase import create_client
 
-# 📦 Supabase 연동
-SUPABASE_URL = os.getenv("SUPABASE_URL") or "https://ejdjhdohqvwrizrrocs.supabase.co"
-SUPABASE_KEY = os.getenv("SUPABASE_KEY") or "your-service-role-key-here"
+# ✅ 환경변수 로딩 (.env 사용)
+load_dotenv()
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ✅ 고객사명 추출
@@ -44,7 +46,7 @@ def save_performance_to_db(client_name, file_name, views, clicks, conversion, ct
         "recorded_at": datetime.utcnow().isoformat()
     }).execute()
 
-# 앱 설정
+# 앱 UI
 st.set_page_config(page_title="시온마케팅 콘텐츠 분석기", layout="wide")
 st.title("🎯 시온마케팅 AI 콘텐츠 분석 시스템")
 st.markdown("---")
@@ -99,15 +101,15 @@ def summarize_all_inputs(frames_desc, transcript, title, prompt):
     return summary
 
 # 업로드 요소
-uploaded_video = st.file_uploader("📽️ 영상 파일 업로드", type=["mp4", "mov"], key="video_upload")
-uploaded_image = st.file_uploader("🖼️ 이미지 파일 업로드", type=["jpg", "jpeg", "png"], key="image_upload")
-uploaded_audio = st.file_uploader("🎧 음성 파일 업로드", type=["mp3", "wav"], key="audio_upload")
+uploaded_video = st.file_uploader("📽️ 영상 파일 업로드", type=["mp4", "mov"])
+uploaded_image = st.file_uploader("🖼️ 이미지 파일 업로드", type=["jpg", "jpeg", "png"])
+uploaded_audio = st.file_uploader("🎧 음성 파일 업로드", type=["mp3", "wav"])
 
 # 이미지 분석
 if uploaded_image:
     image_obj = Image.open(uploaded_image).convert("RGB")
     st.image(image_obj, caption="업로드 이미지", use_container_width=True)
-    if st.button("이미지 분석 시작", key="start_image_analysis"):
+    if st.button("이미지 분석 시작"):
         with st.spinner("이미지 설명 생성 중..."):
             desc = describe_image_with_blip(image_obj)
         with st.spinner("Ollama 분석 중..."):
@@ -121,7 +123,7 @@ if uploaded_video:
         tmp.write(uploaded_video.read())
         video_path = tmp.name
     st.video(video_path)
-    if st.button("영상 분석 시작", key="start_video_analysis"):
+    if st.button("영상 분석 시작"):
         with st.spinner("📸 프레임 추출 중..."):
             frames = extract_keyframes(video_path)
             descriptions = [describe_image_with_blip(Image.open(f)) for f in frames]
@@ -149,7 +151,7 @@ if uploaded_audio:
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(uploaded_audio.read())
         audio_path = tmp.name
-    if st.button("음성 분석 시작", key="start_audio_analysis"):
+    if st.button("음성 분석 시작"):
         if audio_path.endswith(".mp3"):
             converted_path = audio_path.replace(".mp3", ".wav")
             subprocess.run(["ffmpeg", "-y", "-i", audio_path, converted_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
