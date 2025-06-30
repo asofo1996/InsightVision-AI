@@ -11,21 +11,27 @@ from dotenv import load_dotenv
 import re
 from supabase import create_client
 
-# ✅ 환경변수 로딩 (.env 사용)
+# ✅ .env 환경변수 로딩
 load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ✅ 고객사명 추출
-def extract_client_name(filename):
-    match = re.match(r"([A-Za-z0-9]+)_", filename)
-    return match.group(1) if match else "UnknownClient"
+# ✅ 제목 기반 자동 분류 함수
+def parse_title_kor(filename):
+    parts = filename.replace(".mp4", "").replace(".mov", "").replace(".mp3", "").replace(".wav", "").split("-")
+    return {
+        "client": parts[0] if len(parts) > 0 else "미지정",
+        "category": parts[1] if len(parts) > 1 else "기타",
+        "subcontext": "-".join(parts[2:]) if len(parts) > 2 else ""
+    }
 
-# ✅ DB 저장 함수
-def save_analysis_to_db(client_name, file_name, summary, transcript, descriptions, prompt_text):
+# ✅ 분석 결과 저장
+def save_analysis_to_db(client_name, file_name, category, subcontext, summary, transcript, descriptions, prompt_text):
     supabase.table("analysis_results").insert({
         "client_name": client_name,
+        "category": category,
+        "subcontext": subcontext,
         "content_type": "video",
         "file_name": file_name,
         "summary_text": summary,
@@ -35,7 +41,8 @@ def save_analysis_to_db(client_name, file_name, summary, transcript, description
         "created_at": datetime.utcnow().isoformat()
     }).execute()
 
-def save_performance_to_db(client_name, file_name, views, clicks, conversion, ctr):
+# ✅ 성과 + 경험 저장
+def save_performance_to_db(client_name, file_name, views, clicks, conversion, ctr, experience):
     supabase.table("performance_logs").insert({
         "client_name": client_name,
         "file_name": file_name,
@@ -43,17 +50,18 @@ def save_performance_to_db(client_name, file_name, views, clicks, conversion, ct
         "clicks": clicks,
         "conversion": conversion,
         "ctr": ctr,
+        "experience": experience,
         "recorded_at": datetime.utcnow().isoformat()
     }).execute()
 
-# 앱 UI
+# ✅ Streamlit 설정
 st.set_page_config(page_title="시온마케팅 콘텐츠 분석기", layout="wide")
 st.title("🎯 시온마케팅 AI 콘텐츠 분석 시스템")
 st.markdown("---")
 
-prompt_text = st.text_area("분석 프롬프트", "Please analyze the content type, main audience, tone, and suggest 3 improvements.", key="main_prompt")
+prompt_text = st.text_area("분석 프롬프트", "Please analyze the content type, main audience, tone, and suggest 3 improvements.")
 
-# 모델 불러오기
+# ✅ 모델 로딩
 @st.cache_resource
 def load_blip():
     processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
@@ -100,12 +108,12 @@ def summarize_all_inputs(frames_desc, transcript, title, prompt):
     summary += f"\n\n📝 음성 텍스트:\n{transcript}\n\n🔍 분석 지시:\n{prompt.strip()}"
     return summary
 
-# 업로드 요소
+# ✅ 업로드 영역
 uploaded_video = st.file_uploader("📽️ 영상 파일 업로드", type=["mp4", "mov"])
 uploaded_image = st.file_uploader("🖼️ 이미지 파일 업로드", type=["jpg", "jpeg", "png"])
 uploaded_audio = st.file_uploader("🎧 음성 파일 업로드", type=["mp3", "wav"])
 
-# 이미지 분석
+# ✅ 이미지 분석
 if uploaded_image:
     image_obj = Image.open(uploaded_image).convert("RGB")
     st.image(image_obj, caption="업로드 이미지", use_container_width=True)
@@ -113,11 +121,11 @@ if uploaded_image:
         with st.spinner("이미지 설명 생성 중..."):
             desc = describe_image_with_blip(image_obj)
         with st.spinner("Ollama 분석 중..."):
-            result = analyze_with_ollama(f"시온마케팅 광고 전문가 기준 분석\n파일명: {uploaded_image.name}\n이미지 설명: {desc}\n\n{prompt_text}")
+            result = analyze_with_ollama(f"파일명: {uploaded_image.name}\n이미지 설명: {desc}\n\n{prompt_text}")
         st.success("분석 완료 ✅")
         st.write(result)
 
-# 영상 분석
+# ✅ 영상 분석
 if uploaded_video:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
         tmp.write(uploaded_video.read())
@@ -128,7 +136,7 @@ if uploaded_video:
             frames = extract_keyframes(video_path)
             descriptions = [describe_image_with_blip(Image.open(f)) for f in frames]
 
-        with st.spinner("🗣️ Whisper 음성 변환 중..."):
+        with st.spinner("🗣️ Whisper 음성 분석 중..."):
             audio_path = os.path.join(tempfile.gettempdir(), "audio.wav")
             subprocess.run(["ffmpeg", "-y", "-i", video_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", audio_path],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -138,14 +146,18 @@ if uploaded_video:
             final_prompt = summarize_all_inputs(descriptions, transcript, os.path.basename(video_path), prompt_text)
             result = analyze_with_ollama(final_prompt)
 
-        client_name = extract_client_name(os.path.basename(video_path))
-        save_analysis_to_db(client_name, os.path.basename(video_path), result, transcript, descriptions, prompt_text)
+        parsed = parse_title_kor(os.path.basename(video_path))
+        client_name = parsed["client"]
+        category = parsed["category"]
+        subcontext = parsed["subcontext"]
+
+        save_analysis_to_db(client_name, os.path.basename(video_path), category, subcontext, result, transcript, descriptions, prompt_text)
 
         st.success("영상 분석 완료 ✅")
         st.subheader("🧠 분석 결과")
         st.write(result)
 
-# 음성 분석
+# ✅ 음성 분석
 if uploaded_audio:
     suffix = ".mp3" if uploaded_audio.name.endswith(".mp3") else ".wav"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -166,22 +178,24 @@ if uploaded_audio:
         st.write("요약 결과:")
         st.write(result)
 
-# 📊 광고 성과 수동 입력 폼
+# ✅ 광고 성과 + 경험 입력
 st.markdown("---")
 st.header("📊 광고 성과 수동 입력")
 with st.form("performance_form"):
-    perf_file_name = st.text_input("파일명 (예: SionMarketing_광고영상_06월)", "")
-    perf_client_name = extract_client_name(perf_file_name)
+    perf_file_name = st.text_input("파일명 (예: SionMarketing-종목-내용)", "")
+    parsed = parse_title_kor(perf_file_name)
+    perf_client_name = parsed["client"]
     views = st.number_input("조회수", min_value=0)
     clicks = st.number_input("클릭수", min_value=0)
     conversion = st.number_input("전환수", min_value=0)
     ctr = round((clicks / views) * 100, 2) if views else 0.0
+    experience = st.text_area("📝 광고 경험 메모", placeholder="예: 한지 배경 넣었더니 CTR 상승")
 
-    submitted = st.form_submit_button("성과 데이터 저장")
+    submitted = st.form_submit_button("성과 + 경험 저장")
     if submitted and perf_file_name:
-        save_performance_to_db(perf_client_name, perf_file_name, views, clicks, conversion, ctr)
-        st.success(f"{perf_client_name} 성과 데이터 저장 완료 ✅")
+        save_performance_to_db(perf_client_name, perf_file_name, views, clicks, conversion, ctr, experience)
+        st.success(f"{perf_client_name} 성과 + 경험 저장 완료 ✅")
 
-# 푸터
+# ✅ 푸터
 st.markdown("---")
 st.caption("© 2025 시온마케팅 | 개발자 홍석표")
