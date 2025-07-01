@@ -11,13 +11,11 @@ from dotenv import load_dotenv
 import re
 from supabase import create_client
 
-# ✅ 환경변수 불러오기
 load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ✅ 제목 기반 자동 분류 함수
 def parse_title_kor(filename):
     parts = filename.replace(".mp4", "").replace(".mov", "").replace(".mp3", "").replace(".wav", "").replace(".jpg", "").replace(".jpeg", "").replace(".png", "").split("-")
     return {
@@ -26,7 +24,6 @@ def parse_title_kor(filename):
         "subcontext": "-".join(parts[2:]) if len(parts) > 2 else ""
     }
 
-# ✅ 과거 분석 요약 불러오기
 def fetch_previous_summaries_by_category(category):
     try:
         result = supabase.table("analysis_results") \
@@ -40,7 +37,6 @@ def fetch_previous_summaries_by_category(category):
         print("불러오기 실패:", e)
         return []
 
-# ✅ 과거 경험 기반 전략 불러오기
 def fetch_experiences_by_category(category):
     try:
         result = supabase.table("performance_logs") \
@@ -54,7 +50,6 @@ def fetch_experiences_by_category(category):
         print("경험 불러오기 실패:", e)
         return []
 
-# ✅ 분석 요청 함수
 def analyze_with_ollama(prompt_text, category=None):
     previous_summaries = fetch_previous_summaries_by_category(category) if category else []
     experiences = fetch_experiences_by_category(category) if category else []
@@ -76,7 +71,6 @@ def analyze_with_ollama(prompt_text, category=None):
     chain = LLMChain(prompt=template, llm=llm)
     return chain.run(prompt_text=final_prompt)
 
-# ✅ 저장 함수들
 def save_analysis_to_db(client_name, file_name, category, subcontext, summary, transcript, descriptions, prompt_text, content_type):
     supabase.table("analysis_results").insert({
         "client_name": client_name,
@@ -103,11 +97,10 @@ def save_performance_to_db(client_name, file_name, views, clicks, conversion, ct
         "recorded_at": datetime.utcnow().isoformat()
     }).execute()
 
-# ✅ 기본 구성
 st.set_page_config(page_title="AI 광고 전략 분석기", layout="wide")
 st.title("🎯 시온마케팅 콘텐츠 분석 시스템")
 
-prompt_text = st.text_area("분석 프롬프트", "Please analyze the content type, main audience, tone, and suggest 3 improvements.")
+prompt_text = st.text_area("분석 프롬프트", "광고 콘텐츠의 타겟, 톤, 메시지를 분석하고 전략을 추천해 주세요.")
 
 @st.cache_resource
 def load_blip():
@@ -149,7 +142,6 @@ def summarize_all_inputs(frames_desc, transcript, title, prompt):
     summary += f"\n\n📝 텍스트:\n{transcript}\n\n🔍 분석 지시:\n{prompt.strip()}"
     return summary
 
-# ✅ 이미지 업로드 및 분석
 uploaded_image = st.file_uploader("🖼️ 이미지 파일 업로드", type=["jpg", "jpeg", "png"])
 if uploaded_image:
     pil_image = Image.open(uploaded_image).convert("RGB")
@@ -169,7 +161,6 @@ if uploaded_image:
         st.subheader("🧠 분석 결과")
         st.write(result)
 
-# ✅ 영상 업로드 및 분석
 uploaded_video = st.file_uploader("🎥 영상 파일 업로드", type=["mp4", "mov"])
 if uploaded_video:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
@@ -184,23 +175,22 @@ if uploaded_video:
             audio_path = os.path.join(tempfile.gettempdir(), "audio.wav")
             subprocess.run(["ffmpeg", "-y", "-i", video_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", audio_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             transcript = transcribe_audio_whisper(audio_path)
+        parsed = parse_title_kor(uploaded_video.name)
+        client_name = parsed["client"]
+        category = parsed["category"]
+        subcontext = parsed["subcontext"]
         with st.spinner("Ollama 분석 중..."):
-            parsed = parse_title_kor(os.path.basename(video_path))
-            client_name = parsed["client"]
-            category = parsed["category"]
-            subcontext = parsed["subcontext"]
-            full_prompt = summarize_all_inputs(descriptions, transcript, os.path.basename(video_path), prompt_text)
+            full_prompt = summarize_all_inputs(descriptions, transcript, uploaded_video.name, prompt_text)
             result = analyze_with_ollama(full_prompt, category)
-        save_analysis_to_db(client_name, os.path.basename(video_path), category, subcontext, result, transcript, descriptions, prompt_text, content_type="video")
+        save_analysis_to_db(client_name, uploaded_video.name, category, subcontext, result, transcript, descriptions, prompt_text, content_type="video")
         st.success("영상 분석 완료 ✅")
         st.subheader("🧠 분석 결과")
         st.write(result)
 
-# ✅ 광고 성과 입력 + 경험
 st.markdown("---")
 st.header("📊 광고 성과 입력")
 with st.form("performance_form"):
-    perf_file_name = st.text_input("파일명 (예: SionMarketing-종목-내용)", "")
+    perf_file_name = st.text_input("파일명 (예: 하나치과-임플란트-한지배경.mp4)", "")
     parsed = parse_title_kor(perf_file_name)
     perf_client_name = parsed["client"]
     views = st.number_input("조회수", min_value=0)
