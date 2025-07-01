@@ -111,7 +111,7 @@ def save_performance_to_db(client_name, file_name, views, clicks, conversion, ct
 st.set_page_config(page_title="AI 광고 전략 분석기", layout="wide")
 st.title("🎯 시온마케팅 콘텐츠 분석 시스템")
 
-prompt_text = st.text_area("분석 프롬프트", "광고 콘텐츠가 업종·타겟·전환 전략 측면에서 실무에 적합한지 정밀 분석하고, 구체적인 마케팅 개선안을 제시해 주세요.")
+prompt_text = st.text_area("분석 프롬프트", "Please conduct an in-depth analysis to determine whether the advertising content is strategically suitable in terms of industry alignment, target audience, and conversion effectiveness, and provide concrete marketing improvement suggestions.")
 
 @st.cache_resource
 def load_blip():
