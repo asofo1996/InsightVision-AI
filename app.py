@@ -19,14 +19,14 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ✅ 제목 기반 자동 분류 함수
 def parse_title_kor(filename):
-    parts = filename.replace(".mp4", "").replace(".mov", "").replace(".mp3", "").replace(".wav", "").split("-")
+    parts = filename.replace(".mp4", "").replace(".mov", "").replace(".mp3", "").replace(".wav", "").replace(".jpg", "").replace(".jpeg", "").replace(".png", "").split("-")
     return {
         "client": parts[0] if len(parts) > 0 else "미지정",
         "category": parts[1] if len(parts) > 1 else "기타",
         "subcontext": "-".join(parts[2:]) if len(parts) > 2 else ""
     }
 
-# ✅ 과거 요약 불러오기
+# ✅ 과거 분석 요약 불러오기
 def fetch_previous_summaries_by_category(category):
     try:
         result = supabase.table("analysis_results") \
@@ -40,7 +40,7 @@ def fetch_previous_summaries_by_category(category):
         print("불러오기 실패:", e)
         return []
 
-# ✅ 과거 성과/경험 불러오기
+# ✅ 과거 경험 기반 전략 불러오기
 def fetch_experiences_by_category(category):
     try:
         result = supabase.table("performance_logs") \
@@ -77,12 +77,12 @@ def analyze_with_ollama(prompt_text, category=None):
     return chain.run(prompt_text=final_prompt)
 
 # ✅ 저장 함수들
-def save_analysis_to_db(client_name, file_name, category, subcontext, summary, transcript, descriptions, prompt_text):
+def save_analysis_to_db(client_name, file_name, category, subcontext, summary, transcript, descriptions, prompt_text, content_type):
     supabase.table("analysis_results").insert({
         "client_name": client_name,
         "category": category,
         "subcontext": subcontext,
-        "content_type": "video",
+        "content_type": content_type,
         "file_name": file_name,
         "summary_text": summary,
         "raw_transcript": transcript,
@@ -144,29 +144,46 @@ def extract_keyframes(video_path, interval_sec=1):
     return frames
 
 def summarize_all_inputs(frames_desc, transcript, title, prompt):
-    summary = f"🎬 영상 제목: {title}\n\n🖼️ 프레임 설명:\n"
+    summary = f"🎬 콘텐츠 제목: {title}\n\n🖼️ 프레임 설명:\n"
     summary += "\n".join([f"{i+1}. {desc}" for i, desc in enumerate(frames_desc)])
-    summary += f"\n\n📝 음성 텍스트:\n{transcript}\n\n🔍 분석 지시:\n{prompt.strip()}"
+    summary += f"\n\n📝 텍스트:\n{transcript}\n\n🔍 분석 지시:\n{prompt.strip()}"
     return summary
 
-uploaded_video = st.file_uploader("🎥 영상 파일 업로드", type=["mp4", "mov"])
+# ✅ 이미지 업로드 및 분석
+uploaded_image = st.file_uploader("🖼️ 이미지 파일 업로드", type=["jpg", "jpeg", "png"])
+if uploaded_image:
+    pil_image = Image.open(uploaded_image).convert("RGB")
+    st.image(pil_image, caption="업로드된 이미지", use_container_width=True)
+    if st.button("이미지 분석 시작"):
+        with st.spinner("이미지 설명 생성 중..."):
+            image_desc = describe_image_with_blip(pil_image)
+        parsed = parse_title_kor(uploaded_image.name)
+        client_name = parsed["client"]
+        category = parsed["category"]
+        subcontext = parsed["subcontext"]
+        with st.spinner("Ollama 전략 분석 중..."):
+            image_prompt = f"🖼️ 이미지 설명: {image_desc}\n\n{prompt_text}"
+            result = analyze_with_ollama(image_prompt, category)
+        save_analysis_to_db(client_name, uploaded_image.name, category, subcontext, result, "", [image_desc], prompt_text, content_type="image")
+        st.success("이미지 분석 완료 ✅")
+        st.subheader("🧠 분석 결과")
+        st.write(result)
 
+# ✅ 영상 업로드 및 분석
+uploaded_video = st.file_uploader("🎥 영상 파일 업로드", type=["mp4", "mov"])
 if uploaded_video:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
         tmp.write(uploaded_video.read())
         video_path = tmp.name
     st.video(video_path)
-
     if st.button("영상 분석 시작"):
         with st.spinner("프레임 추출 중..."):
             frames = extract_keyframes(video_path)
             descriptions = [describe_image_with_blip(Image.open(f)) for f in frames]
-
         with st.spinner("음성 텍스트 변환 중..."):
             audio_path = os.path.join(tempfile.gettempdir(), "audio.wav")
             subprocess.run(["ffmpeg", "-y", "-i", video_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", audio_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             transcript = transcribe_audio_whisper(audio_path)
-
         with st.spinner("Ollama 분석 중..."):
             parsed = parse_title_kor(os.path.basename(video_path))
             client_name = parsed["client"]
@@ -174,10 +191,8 @@ if uploaded_video:
             subcontext = parsed["subcontext"]
             full_prompt = summarize_all_inputs(descriptions, transcript, os.path.basename(video_path), prompt_text)
             result = analyze_with_ollama(full_prompt, category)
-
-        save_analysis_to_db(client_name, os.path.basename(video_path), category, subcontext, result, transcript, descriptions, prompt_text)
-
-        st.success("분석 완료 ✅")
+        save_analysis_to_db(client_name, os.path.basename(video_path), category, subcontext, result, transcript, descriptions, prompt_text, content_type="video")
+        st.success("영상 분석 완료 ✅")
         st.subheader("🧠 분석 결과")
         st.write(result)
 
@@ -193,7 +208,6 @@ with st.form("performance_form"):
     conversion = st.number_input("전환수", min_value=0)
     ctr = round((clicks / views) * 100, 2) if views else 0.0
     experience = st.text_area("📝 광고 경험 메모", placeholder="예: 한지 배경 넣었더니 CTR 상승")
-
     submitted = st.form_submit_button("성과 + 경험 저장")
     if submitted and perf_file_name:
         save_performance_to_db(perf_client_name, perf_file_name, views, clicks, conversion, ctr, experience)
