@@ -11,19 +11,27 @@ from dotenv import load_dotenv
 import re
 from supabase import create_client
 
+# ✅ 환경 변수 로딩
 load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# ✅ 파일명 기반 자동 분류 함수 (한글/괄호 포함 구조 대응)
 def parse_title_kor(filename):
-    parts = filename.replace(".mp4", "").replace(".mov", "").replace(".mp3", "").replace(".wav", "").replace(".jpg", "").replace(".jpeg", "").replace(".png", "").split("-")
+    filename = os.path.splitext(filename)[0]
+    filename = filename.replace("(", "_").replace(")", "_")
+    parts = re.split(r"[_\-]+", filename)
+    client = parts[0] if len(parts) > 0 else "미지정"
+    category = parts[1] if len(parts) > 1 else "기타"
+    subcontext = "_".join(parts[2:]) if len(parts) > 2 else ""
     return {
-        "client": parts[0] if len(parts) > 0 else "미지정",
-        "category": parts[1] if len(parts) > 1 else "기타",
-        "subcontext": "-".join(parts[2:]) if len(parts) > 2 else ""
+        "client": client,
+        "category": category,
+        "subcontext": subcontext
     }
 
+# ✅ DB에서 기존 요약 및 경험 불러오기
 def fetch_previous_summaries_by_category(category):
     try:
         result = supabase.table("analysis_results") \
@@ -50,6 +58,7 @@ def fetch_experiences_by_category(category):
         print("경험 불러오기 실패:", e)
         return []
 
+# ✅ 전략 분석 요청
 def analyze_with_ollama(prompt_text, category=None):
     previous_summaries = fetch_previous_summaries_by_category(category) if category else []
     experiences = fetch_experiences_by_category(category) if category else []
@@ -71,6 +80,7 @@ def analyze_with_ollama(prompt_text, category=None):
     chain = LLMChain(prompt=template, llm=llm)
     return chain.run(prompt_text=final_prompt)
 
+# ✅ DB 저장 함수들
 def save_analysis_to_db(client_name, file_name, category, subcontext, summary, transcript, descriptions, prompt_text, content_type):
     supabase.table("analysis_results").insert({
         "client_name": client_name,
@@ -97,6 +107,7 @@ def save_performance_to_db(client_name, file_name, views, clicks, conversion, ct
         "recorded_at": datetime.utcnow().isoformat()
     }).execute()
 
+# ✅ Streamlit UI 구성 시작
 st.set_page_config(page_title="AI 광고 전략 분석기", layout="wide")
 st.title("🎯 시온마케팅 콘텐츠 분석 시스템")
 
@@ -142,6 +153,7 @@ def summarize_all_inputs(frames_desc, transcript, title, prompt):
     summary += f"\n\n📝 텍스트:\n{transcript}\n\n🔍 분석 지시:\n{prompt.strip()}"
     return summary
 
+# ✅ 이미지 업로드 분석
 uploaded_image = st.file_uploader("🖼️ 이미지 파일 업로드", type=["jpg", "jpeg", "png"])
 if uploaded_image:
     pil_image = Image.open(uploaded_image).convert("RGB")
@@ -161,6 +173,7 @@ if uploaded_image:
         st.subheader("🧠 분석 결과")
         st.write(result)
 
+# ✅ 영상 업로드 분석
 uploaded_video = st.file_uploader("🎥 영상 파일 업로드", type=["mp4", "mov"])
 if uploaded_video:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
@@ -187,10 +200,11 @@ if uploaded_video:
         st.subheader("🧠 분석 결과")
         st.write(result)
 
+# ✅ 광고 성과 입력 폼
 st.markdown("---")
 st.header("📊 광고 성과 입력")
 with st.form("performance_form"):
-    perf_file_name = st.text_input("파일명 (예: 하나치과-임플란트-한지배경.mp4)", "")
+    perf_file_name = st.text_input("파일명 (예: 장덕(어깨)_250531_GD_01(3).mp4)", "")
     parsed = parse_title_kor(perf_file_name)
     perf_client_name = parsed["client"]
     views = st.number_input("조회수", min_value=0)
