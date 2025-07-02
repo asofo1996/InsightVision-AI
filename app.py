@@ -25,7 +25,7 @@ def parse_title_kor(filename):
     subcontext = "_".join(parts[2:]) if len(parts) > 2 else ""
     return {"client": client, "category": category, "subcontext": subcontext}
 
-# ✅ DB 로딩
+# ✅ DB 불러오기
 def fetch_previous_summaries_by_category(category):
     try:
         result = supabase.table("analysis_results").select("summary_text").eq("category", category).order("created_at", desc=True).limit(5).execute()
@@ -60,7 +60,7 @@ def summarize_all_inputs(frames_desc, transcript, title, prompt):
 {prompt.strip()}
 """
 
-# ✅ Ollama용 심화 분석 프롬프트
+# ✅ Ollama용 프롬프트
 def generate_ollama_prompt(prompt_text, category, file_name, descriptions, transcript, client, subcontext):
     context_intro = "\n".join(fetch_previous_summaries_by_category(category))
     exp_intro = "\n".join(fetch_experiences_by_category(category))
@@ -167,6 +167,10 @@ prompt_text = st.text_area(
     "광고 콘텐츠의 타겟, 전략, 메시지, 구성 측면에서 정밀 분석하고 개선 전략을 3가지 이상 제안해 주세요."
 )
 
+# ✅ session_state 초기화
+if "deep_result" not in st.session_state:
+    st.session_state.deep_result = None
+
 # ✅ 이미지 분석
 uploaded_image = st.file_uploader("🖼️ 이미지 업로드", type=["jpg", "jpeg", "png"])
 if uploaded_image:
@@ -220,12 +224,16 @@ if uploaded_video:
                 deep_result = analyze_with_ollama(full_prompt)
 
             if deep_result:
-                st.success("✅ 정밀 전략 분석 완료")
-                st.subheader("💡 고도화된 실전 전략 제안")
-                st.markdown(deep_result)
+                st.session_state.deep_result = deep_result
                 save_analysis_to_db(parsed["client"], uploaded_video.name, parsed["category"], parsed["subcontext"], deep_result, transcript, descs, prompt_text, "video")
+                st.success("✅ 정밀 전략 분석 완료")
             else:
                 st.error("❌ 정밀 분석 결과가 비어 있습니다. 프롬프트 또는 Ollama 설정을 점검해 주세요.")
+
+# ✅ 항상 결과 유지
+if st.session_state.deep_result:
+    st.subheader("💡 고도화된 실전 전략 제안")
+    st.markdown(st.session_state.deep_result)
 
 # ✅ 광고 성과 입력
 st.markdown("---")
