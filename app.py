@@ -17,7 +17,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ✅ 파일명 기반 자동 분류 함수 (한글/괄호 포함 구조 대응)
+# ✅ 파일명 기반 자동 분류 함수
 def parse_title_kor(filename):
     filename = os.path.splitext(filename)[0]
     filename = filename.replace("(", "_").replace(")", "_")
@@ -25,21 +25,12 @@ def parse_title_kor(filename):
     client = parts[0] if len(parts) > 0 else "미지정"
     category = parts[1] if len(parts) > 1 else "기타"
     subcontext = "_".join(parts[2:]) if len(parts) > 2 else ""
-    return {
-        "client": client,
-        "category": category,
-        "subcontext": subcontext
-    }
+    return {"client": client, "category": category, "subcontext": subcontext}
 
-# ✅ DB에서 기존 요약 및 경험 불러오기
+# ✅ DB에서 기존 데이터 로딩
 def fetch_previous_summaries_by_category(category):
     try:
-        result = supabase.table("analysis_results") \
-            .select("summary_text") \
-            .eq("category", category) \
-            .order("created_at", desc=True) \
-            .limit(5) \
-            .execute()
+        result = supabase.table("analysis_results").select("summary_text").eq("category", category).order("created_at", desc=True).limit(5).execute()
         return [r["summary_text"] for r in result.data if r["summary_text"]]
     except Exception as e:
         print("불러오기 실패:", e)
@@ -47,25 +38,41 @@ def fetch_previous_summaries_by_category(category):
 
 def fetch_experiences_by_category(category):
     try:
-        result = supabase.table("performance_logs") \
-            .select("experience, ctr") \
-            .neq("experience", "") \
-            .order("recorded_at", desc=True) \
-            .limit(10) \
-            .execute()
+        result = supabase.table("performance_logs").select("experience, ctr").neq("experience", "").order("recorded_at", desc=True).limit(10).execute()
         return [f"- {r['experience']} (CTR: {r['ctr']}%)" for r in result.data if r["experience"]]
     except Exception as e:
         print("경험 불러오기 실패:", e)
         return []
 
-# ✅ 전략 분석 요청
+# ✅ 콘텐츠 분석용 요약 생성 함수
+def summarize_all_inputs(frames_desc, transcript, title, prompt):
+    summary = f"""🎬 광고 콘텐츠 분석 시작
+
+📌 광고 제목 및 파일명: {title}
+
+🖼️ 시각 콘텐츠 요약:
+{chr(10).join([f"{i+1}. {desc}" for i, desc in enumerate(frames_desc)])}
+
+🎙️ 음성 또는 텍스트 주요 메시지:
+{transcript}
+
+🔍 분석 요청 목적:
+- 고객사 업종/종목과의 전략적 적합성
+- 현재 국내 타겟 시장과의 정합성
+- 전환율 관점에서의 콘텐츠 구조 적합성
+- 실행 가능한 실무 개선 전략 3가지 이상
+
+💡 참고:
+{prompt.strip()}
+"""
+    return summary
+
+# ✅ 전략 분석 함수
 def analyze_with_ollama(prompt_text, category=None):
     previous_summaries = fetch_previous_summaries_by_category(category) if category else []
     experiences = fetch_experiences_by_category(category) if category else []
-
     context_intro = "\n".join([f"- {s}" for s in previous_summaries])
     exp_intro = "\n".join(experiences)
-
     full_prompt = f"""[분석 요청 목적]
 1. 광고 콘텐츠가 해당 광고주의 업종 및 종목(제품/서비스)의 목적과 메시지에 부합하는가?
 2. 현재 국내 시장 및 시청자 특성과 비교했을 때, 타겟층과의 정합성이 높은가?
@@ -87,7 +94,7 @@ def analyze_with_ollama(prompt_text, category=None):
     chain = LLMChain(prompt=template, llm=llm)
     return chain.run(prompt_text=full_prompt)
 
-# ✅ DB 저장 함수들
+# ✅ Supabase 저장 함수들
 def save_analysis_to_db(client_name, file_name, category, subcontext, summary, transcript, descriptions, prompt_text, content_type):
     supabase.table("analysis_results").insert({
         "client_name": client_name,
@@ -114,10 +121,9 @@ def save_performance_to_db(client_name, file_name, views, clicks, conversion, ct
         "recorded_at": datetime.utcnow().isoformat()
     }).execute()
 
-# ✅ Streamlit UI 구성 시작
+# ✅ Streamlit UI
 st.set_page_config(page_title="AI 광고 전략 분석기", layout="wide")
 st.title("🎯 시온마케팅 콘텐츠 분석 시스템")
-
 prompt_text = st.text_area("분석 프롬프트", "광고 콘텐츠가 업종·타겟·전환 전략 측면에서 실무에 적합한지 정밀 분석하고, 구체적인 마케팅 개선안을 3가지 이상 제시해 주세요.")
 
 @st.cache_resource
@@ -154,14 +160,8 @@ def extract_keyframes(video_path, interval_sec=1):
     cap.release()
     return frames
 
-def summarize_all_inputs(frames_desc, transcript, title, prompt):
-    summary = f"🎬 콘텐츠 제목: {title}\n\n🖼️ 프레임 설명:\n"
-    summary += "\n".join([f"{i+1}. {desc}" for i, desc in enumerate(frames_desc)])
-    summary += f"\n\n📝 텍스트:\n{transcript}\n\n🔍 분석 지시:\n{prompt.strip()}"
-    return summary
-
-# ✅ 이미지 업로드 분석
-uploaded_image = st.file_uploader("🖼️ 이미지 파일 업로드", type=["jpg", "jpeg", "png"])
+# ✅ 이미지 분석
+uploaded_image = st.file_uploader("🖼️ 이미지 업로드", type=["jpg", "jpeg", "png"])
 if uploaded_image:
     pil_image = Image.open(uploaded_image).convert("RGB")
     st.image(pil_image, caption="업로드된 이미지", use_container_width=True)
@@ -176,12 +176,12 @@ if uploaded_image:
             image_prompt = f"🖼️ 이미지 설명: {image_desc}\n\n{prompt_text}"
             result = analyze_with_ollama(image_prompt, category)
         save_analysis_to_db(client_name, uploaded_image.name, category, subcontext, result, "", [image_desc], prompt_text, content_type="image")
-        st.success("이미지 분석 완료 ✅")
+        st.success("✅ 이미지 분석 완료")
         st.subheader("🧠 분석 결과")
         st.write(result)
 
-# ✅ 영상 업로드 분석
-uploaded_video = st.file_uploader("🎥 영상 파일 업로드", type=["mp4", "mov"])
+# ✅ 영상 분석
+uploaded_video = st.file_uploader("🎥 영상 업로드", type=["mp4", "mov"])
 if uploaded_video:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
         tmp.write(uploaded_video.read())
@@ -199,11 +199,11 @@ if uploaded_video:
         client_name = parsed["client"]
         category = parsed["category"]
         subcontext = parsed["subcontext"]
-        with st.spinner("Ollama 분석 중..."):
+        with st.spinner("Ollama 전략 분석 중..."):
             full_prompt = summarize_all_inputs(descriptions, transcript, uploaded_video.name, prompt_text)
             result = analyze_with_ollama(full_prompt, category)
         save_analysis_to_db(client_name, uploaded_video.name, category, subcontext, result, transcript, descriptions, prompt_text, content_type="video")
-        st.success("영상 분석 완료 ✅")
+        st.success("✅ 영상 분석 완료")
         st.subheader("🧠 분석 결과")
         st.write(result)
 
@@ -222,6 +222,6 @@ with st.form("performance_form"):
     submitted = st.form_submit_button("성과 + 경험 저장")
     if submitted and perf_file_name:
         save_performance_to_db(perf_client_name, perf_file_name, views, clicks, conversion, ctr, experience)
-        st.success(f"{perf_client_name} 성과 + 경험 저장 완료 ✅")
+        st.success(f"✅ {perf_client_name} 성과 + 경험 저장 완료")
 
 st.caption("© 2025 시온마케팅 | 개발자 홍석표")
